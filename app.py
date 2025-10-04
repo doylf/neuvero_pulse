@@ -37,7 +37,7 @@ if AIRTABLE_API_KEY and AIRTABLE_BASE_ID and AIRTABLE_TABLE_NAME:
     airtable_api = Api(AIRTABLE_API_KEY)
     airtable_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
 
-HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/v1/chat/completions"
 
 print("=== mybrain@work SMS Service Starting ===")
 print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
@@ -46,16 +46,20 @@ print(f"Airtable table: {AIRTABLE_TABLE_NAME}")
 print("All environment variables validated successfully")
 
 def query_huggingface(prompt):
-    """Query Hugging Face LLM for a response"""
-    headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
+    """Query Hugging Face LLM for a response using OpenAI-compatible API"""
+    headers = {
+        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
     payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 250,
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "return_full_text": False
-        }
+        "model": "meta-llama/Llama-3.2-3B-Instruct",
+        "messages": [
+            {"role": "system", "content": "You are a helpful AI assistant responding to text messages. Keep your responses brief, friendly, and conversational."},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 150,
+        "temperature": 0.7
     }
     
     try:
@@ -63,11 +67,14 @@ def query_huggingface(prompt):
         response.raise_for_status()
         result = response.json()
         
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get('generated_text', '').strip()
+        if 'choices' in result and len(result['choices']) > 0:
+            return result['choices'][0]['message']['content'].strip()
         return "I'm sorry, I couldn't generate a response at this time."
     except Exception as e:
         print(f"Error querying Hugging Face: {str(e)}")
+        if 'response' in locals():
+            print(f"Response status: {response.status_code}")
+            print(f"Response body: {response.text[:500]}")
         return "I'm having trouble thinking right now. Please try again later."
 
 def save_to_airtable(from_number, to_number, message, response, timestamp):
