@@ -201,7 +201,7 @@ def sms_reply():
                 response_text = get_response_from_table("STOP")
                 new_step = "start"
             elif incoming_msg in ["1", "2", "3"]:
-                trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
+                trigger_map = {"1": "CO-WORKER", "2": "BOSS", "3": "SELF"}
                 trigger = trigger_map[incoming_msg]
                 response_text = get_response_from_table(trigger)
                 new_step = "confess"

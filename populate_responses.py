@@ -1,3 +1,4 @@
+from typing import Self
 from pyairtable import Api
 import os
 
@@ -21,6 +22,12 @@ responses_data = [
     {"Trigger": "COACHING_CONFIRM_NO", "Prompt": "No problem. Text OUCH anytime.", "ResponseType": "COACHING", "Weight": 1},
     {"Trigger": "WIN_PROMPT", "Prompt": "Thanks! Text OUCH anytime.", "ResponseType": "NORMAL", "Weight": 1},
     {"Trigger": "DEFAULT", "Prompt": "Text OUCH to start career tips.", "ResponseType": "NORMAL", "Weight": 1}
+
+
+    {"Trigger": "CO-WORKER", "Prompt": "User said: {{confession}}. Context: co-worker issue. Past win: {{win or 'none'}}. Reply in 10 calm words, address workplace frustration with evidence.", "ResponseType": "NORMAL", "Weight": 1}
+    {"Trigger": "BOSS", "Prompt": "User said: {{confession}}. Context: boss issue. Past win: {{win or 'none'}}. Reply in 10 calm words, counter doubt with evidence.", "ResponseType": "NORMAL", "Weight": 1}
+    {"Trigger": "SELF", "Prompt": "User said: {{confession}}. Context: self-doubt. Past win: {{win or 'none'}}. Reply in 10 calm words, boost confidence with evidence.", "ResponseType": "NORMAL", "Weight": 1}
+    
 ]
 
 # Populate the table
