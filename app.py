@@ -124,9 +124,9 @@ def get_past_wins(phone_number):
 
 
 def get_user_state(phone_number):
-    """Get the last state for a user from Airtable"""
+    """Get the last state for a user from Airtable. Returns (step, last_confession, last_win, is_first_time)"""
     if not confessions_table:
-        return "start", None, None
+        return "start", None, None, True
 
     try:
         records = confessions_table.all(formula=f"{{phone}}='{phone_number}'",
@@ -138,13 +138,13 @@ def get_user_state(phone_number):
             last_win = fields.get('win', '')
 
             if step == "win_prompt" and last_win and len(last_win.strip()) > 0:
-                return "start", last_confession, last_win
+                return "start", last_confession, last_win, False
 
-            return step, last_confession, last_win
-        return "start", None, None
+            return step, last_confession, last_win, False
+        return "start", None, None, True
     except Exception as e:
         print(f"Error getting user state: {str(e)}")
-        return "start", None, None
+        return "start", None, None, True
 
 
 def save_to_airtable(phone, confession, win, step="start"):
@@ -192,9 +192,9 @@ def sms_reply():
 
         print(f"Received SMS from {from_number}: {incoming_msg}")
 
-        current_step, last_confession, last_win = get_user_state(from_number)
+        current_step, last_confession, last_win, is_first_time = get_user_state(from_number)
         print(
-            f"Current state: step={current_step}, last_confession={last_confession}, last_win={last_win}"
+            f"Current state: step={current_step}, last_confession={last_confession}, last_win={last_win}, is_first_time={is_first_time}"
         )
 
         response_text = ""
@@ -204,8 +204,14 @@ def sms_reply():
 
         # START STATE - Check for OUCH trigger
         if incoming_msg == "OUCH":
-            response_text = get_response_from_table("SUBSCRIBE")
-            new_step = "opt_in"
+            if is_first_time:
+                # First-time user: show opt-in message
+                response_text = get_response_from_table("SUBSCRIBE")
+                new_step = "opt_in"
+            else:
+                # Returning user: skip directly to trigger selection
+                response_text = "Welcome back! Reply:\n1. Co-worker\n2. Boss\n3. Self-doubt\n\nOr HELP/STOP"
+                new_step = "opt_in"
 
         # OPT-IN STATE
         elif current_step == "opt_in":
@@ -216,7 +222,7 @@ def sms_reply():
                 response_text = get_response_from_table("STOP")
                 new_step = "start"
             elif incoming_msg in ["1", "2", "3"]:
-                trigger_map = {"1": "CO-WORKER", "2": "BOSS", "3": "SELF"}
+                trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
                 trigger = trigger_map[incoming_msg]
                 response_text = get_response_from_table(trigger)
                 new_step = "confess"
