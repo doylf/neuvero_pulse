@@ -199,7 +199,7 @@ def sms_reply():
                 response_text = get_response_from_table("STOP")
                 new_step = "start"
             elif incoming_msg in ["1", "2", "3"]:
-                trigger_map = {"1": "CO-WORKER", "2": "BOSS", "3": "SELF"}
+                trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
                 trigger = trigger_map[incoming_msg]
                 response_text = get_response_from_table(trigger)
                 new_step = "confess"
@@ -221,7 +221,8 @@ def sms_reply():
                 past_wins = get_past_wins(from_number)
                 last_win_text = past_wins[-1] if past_wins else "none"
                 
-                prompt = f"User said: {incoming_msg_original}. Past win: {last_win_text}. Reply in 10 calm words, counter doubt with evidence."
+                trigger_context = last_confession.lower() if last_confession else "workplace"
+                prompt = f"User said: {incoming_msg_original}. Context: {trigger_context} issue. Past win: {last_win_text}. Reply in 10 calm words, address workplace frustration with evidence."
                 ai_response = query_gemini(prompt)
                 response_text = f"{ai_response}\n\nText a win?"
                 win_to_save = ""
