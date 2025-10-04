@@ -77,24 +77,28 @@ def classify_message(message):
         return "NORMAL"
 
 def get_past_wins(phone_number):
-    """Fetch past wins from Airtable for a phone number"""
+    """Fetch past user-reported wins from Airtable (not AI responses)"""
     if not airtable_table:
         return []
     
     try:
-        records = airtable_table.all(formula=f"{{phone}}='{phone_number}'")
+        # Only fetch wins where step is "start" (user-submitted wins after win_prompt)
+        # step="win_prompt" contains AI responses, step="start" contains user wins
+        formula = f"AND({{phone}}='{phone_number}', {{step}}='start')"
+        records = airtable_table.all(formula=formula)
         wins = []
         for record in records:
             fields = record.get('fields', {})
             win = fields.get('win', '').strip()
-            if win and win != fields.get('confession', ''):
+            # Only include non-empty wins
+            if win and len(win) > 0:
                 wins.append(win)
         return wins
     except Exception as e:
         print(f"Error fetching wins from Airtable: {str(e)}")
         return []
 
-def save_to_airtable(phone, confession, win, timestamp, step=1):
+def save_to_airtable(phone, confession, win, timestamp, step="start"):
     """Save conversation to Airtable"""
     if not airtable_table:
         print("Airtable not configured - skipping save")
@@ -185,7 +189,7 @@ def sms_reply():
                 new_step = "start"
             elif classification == "COACHING":
                 response_text = "Need real talk? Text YES for a 10-min call: go.neuvero.ai/book-floyd"
-                new_step = "start"
+                new_step = "coaching_confirm"
             else:  # NORMAL
                 past_wins = get_past_wins(from_number)
                 last_win_text = past_wins[-1] if past_wins else "none"
@@ -195,6 +199,15 @@ def sms_reply():
                 response_text = f"{ai_response}\n\nText a win?"
                 win_to_save = ai_response
                 new_step = "win_prompt"
+        
+        # COACHING_CONFIRM STATE - Handle YES response
+        elif current_step == "coaching_confirm":
+            if incoming_msg == "YES":
+                response_text = "Great! Book your call here: go.neuvero.ai/book-floyd. Text OUCH anytime for support."
+                new_step = "start"
+            else:
+                response_text = "No problem. Text OUCH anytime you need support."
+                new_step = "start"
         
         # WIN_PROMPT STATE
         elif current_step == "win_prompt":

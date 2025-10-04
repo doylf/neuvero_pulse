@@ -1,33 +1,48 @@
 # mybrain@work SMS Service
 
 ## Overview
-A Python Flask application that receives SMS messages via Twilio webhooks, processes them using a Hugging Face LLM (Mistral-7B), and stores conversation history in Airtable.
+A Python Flask application that receives SMS messages via Twilio webhooks, processes them using Google Gemini AI with a multi-step conversation flow for career coaching support, and stores interaction history in Airtable.
 
 ## Project Architecture
 
 ### Technology Stack
 - **Backend Framework**: Flask
 - **SMS Service**: Twilio
-- **AI/LLM**: Hugging Face Inference API (Mistral-7B-Instruct-v0.2)
+- **AI/LLM**: Google Gemini 2.0 Flash
 - **Database**: Airtable
 - **Production Server**: Gunicorn
+- **State Management**: Airtable-based state tracking (stateless webhook design)
 
 ### Key Components
 
-1. **SMS Webhook Endpoint** (`/sms`)
+1. **Multi-Step Conversation Flow**
+   - **START**: User texts "OUCH" to begin → transitions to opt_in
+   - **OPT_IN**: User selects trigger (1=Co-worker, 2=Boss, 3=Self-doubt) or HELP/STOP → transitions to confess
+   - **CONFESS**: Gemini classifies message (EMERGENCY/NORMAL/COACHING):
+     - EMERGENCY: Provides 988 crisis hotline
+     - COACHING: Offers 10-min booking link
+     - NORMAL: Fetches past wins, generates empathetic response, asks for wins → transitions to win_prompt
+   - **WIN_PROMPT**: Stores user's reported win → transitions back to start
+
+2. **SMS Webhook Endpoint** (`/sms`)
    - Receives incoming SMS messages from Twilio
-   - Processes messages through Hugging Face LLM
-   - Sends AI-generated responses back via SMS
-   - Stores conversation history in Airtable
+   - Queries Airtable to determine user's current conversation step
+   - Routes messages through appropriate state handler
+   - Uses Gemini for message classification and response generation
+   - Saves all interactions to Airtable with step tracking
 
-2. **Hugging Face Integration**
-   - Uses Mistral-7B-Instruct-v0.2 model
-   - Configurable temperature and token limits
-   - Handles API timeouts and errors gracefully
+3. **Google Gemini Integration**
+   - Uses Gemini 2.0 Flash model
+   - Two use cases:
+     - Message classification (EMERGENCY/NORMAL/COACHING)
+     - Empathetic response generation with evidence-based counters to self-doubt
+   - Handles API errors gracefully
 
-3. **Airtable Storage**
-   - Stores: from number, to number, incoming message, AI response, timestamp
-   - Automatic record creation for each conversation
+4. **Airtable Storage**
+   - Fields: id, phone, confession, win, timestamp, step
+   - Tracks complete interaction history per user
+   - Enables past win retrieval for personalized responses
+   - State persistence through step field
 
 ### API Endpoints
 - `GET /` - Home endpoint with service info
@@ -40,10 +55,11 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 - `TWILIO_ACCOUNT_SID` - Twilio account identifier
 - `TWILIO_AUTH_TOKEN` - Twilio authentication token
 - `TWILIO_PHONE_NUMBER` - Twilio phone number (format: +1234567890)
-- `HUGGINGFACE_API_KEY` - Hugging Face API token
+- `GEMINI_API_KEY` - Google Gemini API key
 - `AIRTABLE_API_KEY` - Airtable personal access token
 - `AIRTABLE_BASE_ID` - Airtable base ID
 - `AIRTABLE_TABLE_NAME` - Airtable table name
+- `SESSION_SECRET` - Flask session secret (optional, auto-generated in dev)
 
 ## Setup Instructions
 
@@ -54,12 +70,13 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 4. Set the HTTP method to `POST`
 
 ### Airtable Setup
-Your Airtable table should have these fields:
-- `From` (Single line text)
-- `To` (Single line text)
-- `Incoming Message` (Long text)
-- `AI Response` (Long text)
-- `Timestamp` (Single line text or Date)
+Your Airtable "Confessions" table should have these fields:
+- `id` (Auto Number) - Primary key
+- `phone` (Single line text) - User's phone number
+- `confession` (Single line text) - User's message/input
+- `win` (Single line text) - User's reported win or AI response
+- `timestamp` (Date/Time) - When the message was received
+- `step` (Single Select: opt_in, confess, win_prompt, start) - Current conversation state
 
 ## Running the Application
 The application runs on port 8000 using Gunicorn with the command:
@@ -71,3 +88,8 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
 - 2025-10-04: Initial setup with Flask, Twilio, Hugging Face, and Airtable integration
 - Configured Gunicorn for production deployment
 - Added health check and home endpoints
+- 2025-10-04: Migrated from Hugging Face to Google Gemini 2.0 Flash
+- Implemented complete multi-step conversation flow with state management
+- Added message classification (EMERGENCY/NORMAL/COACHING)
+- Implemented past win retrieval for personalized responses
+- Updated Airtable schema to match user requirements (phone, confession, win, timestamp, step)
