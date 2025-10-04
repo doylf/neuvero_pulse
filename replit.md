@@ -99,3 +99,8 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
   - Replaced cookie-based state with Airtable state management (Twilio webhooks are stateless)
   - Fixed win logging: user wins saved with step="win_prompt" for proper retrieval
   - Auto-reset logic: state returns to "start" after win is saved
+- 2025-10-04: First-time user detection:
+  - Opt-in message (SUBSCRIBE) now only shown once per phone number
+  - Added `is_first_time` flag to track new vs returning users
+  - Returning users get "Welcome back" message and skip to trigger selection
+  - Enhanced AI prompt to include trigger context (co-worker/boss/self-doubt) for personalized responses
