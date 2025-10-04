@@ -5,13 +5,14 @@ from twilio.twiml.messaging_response import MessagingResponse
 import requests
 from pyairtable import Api
 from datetime import datetime
+import google.generativeai as genai
 
 app = Flask(__name__)
 
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
 TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
-HUGGINGFACE_API_KEY = os.environ.get('HUGGINGFACE_API_KEY', '')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY', '')
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', '')
 AIRTABLE_TABLE_NAME = os.environ.get('AIRTABLE_TABLE_NAME', '')
@@ -20,7 +21,7 @@ required_env_vars = {
     'TWILIO_ACCOUNT_SID': TWILIO_ACCOUNT_SID,
     'TWILIO_AUTH_TOKEN': TWILIO_AUTH_TOKEN,
     'TWILIO_PHONE_NUMBER': TWILIO_PHONE_NUMBER,
-    'HUGGINGFACE_API_KEY': HUGGINGFACE_API_KEY,
+    'GEMINI_API_KEY': GEMINI_API_KEY,
     'AIRTABLE_API_KEY': AIRTABLE_API_KEY,
     'AIRTABLE_BASE_ID': AIRTABLE_BASE_ID,
     'AIRTABLE_TABLE_NAME': AIRTABLE_TABLE_NAME
@@ -37,48 +38,35 @@ if AIRTABLE_API_KEY and AIRTABLE_BASE_ID and AIRTABLE_TABLE_NAME:
     airtable_api = Api(AIRTABLE_API_KEY)
     airtable_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
 
-HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta"
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+else:
+    gemini_model = None
 
 print("=== mybrain@work SMS Service Starting ===")
 print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
 print(f"Airtable base: {AIRTABLE_BASE_ID}")
 print(f"Airtable table: {AIRTABLE_TABLE_NAME}")
+print(f"AI Model: Google Gemini 2.0 Flash")
 print("All environment variables validated successfully")
 
-def query_huggingface(prompt):
-    """Query Hugging Face serverless inference API"""
-    headers = {
-        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "inputs": f"You are a helpful assistant responding to text messages. Keep responses brief and friendly.\n\nUser: {prompt}\n\nAssistant:",
-        "parameters": {
-            "max_new_tokens": 150,
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "return_full_text": False
-        }
-    }
+def query_ai(prompt):
+    """Query Google Gemini AI for a response"""
+    if not gemini_model:
+        return "AI service not configured. Please add GEMINI_API_KEY."
     
     try:
-        response = requests.post(HUGGINGFACE_API_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-        
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get('generated_text', '').strip()
-        elif isinstance(result, dict) and 'generated_text' in result:
-            return result['generated_text'].strip()
-        return "I'm sorry, I couldn't generate a response at this time."
-    except requests.exceptions.RequestException as e:
-        print(f"Error querying Hugging Face: {str(e)}")
-        try:
-            print(f"Response status: {response.status_code}")
-            print(f"Response body: {response.text[:500]}")
-        except:
-            pass
+        response = gemini_model.generate_content(
+            f"You are a helpful AI assistant responding to text messages. Keep your responses brief (1-2 sentences), friendly, and conversational.\n\nUser message: {prompt}\n\nYour response:",
+            generation_config=genai.GenerationConfig(
+                temperature=0.7,
+                max_output_tokens=150,
+            )
+        )
+        return response.text.strip()
+    except Exception as e:
+        print(f"Error querying Gemini AI: {str(e)}")
         return "I'm having trouble thinking right now. Please try again later."
 
 def save_to_airtable(from_number, to_number, message, response, timestamp):
@@ -113,9 +101,7 @@ def sms_reply():
         
         print(f"Received SMS from {from_number}: {incoming_msg}")
         
-        prompt = f"You are a helpful AI assistant. A user sent you this message: '{incoming_msg}'. Provide a brief, friendly, and helpful response."
-        
-        ai_response = query_huggingface(prompt)
+        ai_response = query_ai(incoming_msg)
         
         save_to_airtable(from_number, to_number, incoming_msg, ai_response, timestamp)
         
