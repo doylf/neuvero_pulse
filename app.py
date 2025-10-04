@@ -69,21 +69,21 @@ def query_ai(prompt):
         print(f"Error querying Gemini AI: {str(e)}")
         return "I'm having trouble thinking right now. Please try again later."
 
-def save_to_airtable(from_number, to_number, message, response, timestamp):
+def save_to_airtable(phone, confession, win, timestamp, step=1):
     """Save conversation to Airtable"""
     if not airtable_table:
         print("Airtable not configured - skipping save")
         return
     try:
         record = {
-            "From": from_number,
-            "To": to_number,
-            "Incoming Message": message,
-            "AI Response": response,
-            "Timestamp": timestamp
+            "phone": phone,
+            "confession": confession,
+            "win": win,
+            "timestamp": timestamp,
+            "step": step
         }
         airtable_table.create(record)
-        print(f"Saved to Airtable: {from_number} -> {message[:50]}...")
+        print(f"Saved to Airtable: {phone} -> {confession[:50]}...")
     except Exception as e:
         print(f"Error saving to Airtable: {str(e)}")
 
@@ -103,7 +103,13 @@ def sms_reply():
         
         ai_response = query_ai(incoming_msg)
         
-        save_to_airtable(from_number, to_number, incoming_msg, ai_response, timestamp)
+        save_to_airtable(
+            phone=from_number,
+            confession=incoming_msg,
+            win=ai_response,
+            timestamp=timestamp,
+            step=1
+        )
         
         resp = MessagingResponse()
         resp.message(ai_response)
