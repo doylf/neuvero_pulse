@@ -33,10 +33,6 @@ outputType = "console"
 localPort = 8000
 externalPort = 80
 
-[[ports]]
-localPort = 38511
-externalPort = 3000
-
 [deployment]
 deploymentTarget = "vm"
 run = ["gunicorn", "--bind=0.0.0.0:8000", "--reuse-port", "--workers=1", "app:app"]
