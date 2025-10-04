@@ -1,0 +1,160 @@
+2025-10-04 16:17:12.64
+6d18cf14
+User
+Traceback (most recent call last):
+2025-10-04 16:17:12.65
+6d18cf14
+User
+File "/home/runner/workspace/app.py", line 158, in save_to_airtable
+2025-10-04 16:17:12.65
+6d18cf14
+User
+result = confessions_table.create(record)
+2025-10-04 16:17:12.65
+6d18cf14
+User
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-04 16:17:12.65
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/table.py", line 362, in create
+2025-10-04 16:17:12.65
+6d18cf14
+User
+created = self.api.post(
+2025-10-04 16:17:12.65
+6d18cf14
+User
+^^^^^^^^^^^^^^
+2025-10-04 16:17:12.65
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/api.py", line 309, in post
+2025-10-04 16:17:12.65
+6d18cf14
+User
+return self.request("POST", url, **kwargs)
+2025-10-04 16:17:12.65
+6d18cf14
+User
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-04 16:17:12.65
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/api.py", line 295, in request
+2025-10-04 16:17:12.65
+6d18cf14
+User
+return self._process_response(response)
+2025-10-04 16:17:12.65
+6d18cf14
+User
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-04 16:17:12.65
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/api.py", line 337, in _process_response
+2025-10-04 16:17:12.65
+6d18cf14
+User
+raise exc
+2025-10-04 16:17:12.65
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/api.py", line 327, in _process_response
+2025-10-04 16:17:12.65
+6d18cf14
+User
+response.raise_for_status()
+2025-10-04 16:17:12.65
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/requests/models.py", line 1026, in raise_for_status
+2025-10-04 16:17:12.65
+6d18cf14
+User
+raise HTTPError(http_error_msg, response=self)
+2025-10-04 16:17:12.65
+6d18cf14
+User
+requests.exceptions.HTTPError: ('422 Client Error: Unprocessable Entity for url: https://api.airtable.com/v0/app6FCWzzBwIgJ2No/Confessions', '{\'type\': \'UNKNOWN_FIELD_NAME\', \'message\': \'Unknown field name: "phone"\'}')
+2025-10-04 16:17:22.78
+6d18cf14
+User
+Traceback (most recent call last):
+2025-10-04 16:17:22.78
+6d18cf14
+User
+File "/home/runner/workspace/app.py", line 158, in save_to_airtable
+2025-10-04 16:17:22.78
+6d18cf14
+User
+result = confessions_table.create(record)
+2025-10-04 16:17:22.78
+6d18cf14
+User
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-04 16:17:22.78
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/table.py", line 362, in create
+2025-10-04 16:17:22.78
+6d18cf14
+User
+created = self.api.post(
+2025-10-04 16:17:22.78
+6d18cf14
+User
+^^^^^^^^^^^^^^
+2025-10-04 16:17:22.78
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/api.py", line 309, in post
+2025-10-04 16:17:22.78
+6d18cf14
+User
+return self.request("POST", url, **kwargs)
+2025-10-04 16:17:22.78
+6d18cf14
+User
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-04 16:17:22.78
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/api.py", line 295, in request
+2025-10-04 16:17:22.78
+6d18cf14
+User
+return self._process_response(response)
+2025-10-04 16:17:22.78
+6d18cf14
+User
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-04 16:17:22.78
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/api.py", line 337, in _process_response
+2025-10-04 16:17:22.78
+6d18cf14
+User
+raise exc
+2025-10-04 16:17:22.78
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/pyairtable/api/api.py", line 327, in _process_response
+2025-10-04 16:17:22.78
+6d18cf14
+User
+response.raise_for_status()
+2025-10-04 16:17:22.78
+6d18cf14
+User
+File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/requests/models.py", line 1026, in raise_for_status
+2025-10-04 16:17:22.78
+6d18cf14
+User
+raise HTTPError(http_error_msg, response=self)
+2025-10-04 16:17:22.78
+6d18cf14
+User
+requests.exceptions.HTTPError: ('422 Client Error: Unprocessable Entity for url: https://api.airtable.com/v0/app6FCWzzBwIgJ2No/Confessions', '{\'type\': \'UNKNOWN_FIELD_NAME\', \'message\': \'Unknown field name: "phone"\'}')
