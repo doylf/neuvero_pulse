@@ -88,8 +88,14 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
 - 2025-10-04: Initial setup with Flask, Twilio, Hugging Face, and Airtable integration
 - Configured Gunicorn for production deployment
 - Added health check and home endpoints
-- 2025-10-04: Migrated from Hugging Face to Google Gemini 2.0 Flash
+- 2025-10-04: Migrated from Hugging Face to Google Gemini 2.0 Flash (later changed to 1.5 Flash)
 - Implemented complete multi-step conversation flow with state management
 - Added message classification (EMERGENCY/NORMAL/COACHING)
 - Implemented past win retrieval for personalized responses
 - Updated Airtable schema to match user requirements (phone, confession, win, timestamp, step)
+- 2025-10-04: Major refactor to database-driven responses:
+  - Added Airtable "Responses" table for all text responses (driven by Trigger field)
+  - Switched to Gemini 1.5 Flash model
+  - Replaced cookie-based state with Airtable state management (Twilio webhooks are stateless)
+  - Fixed win logging: user wins saved with step="win_prompt" for proper retrieval
+  - Auto-reset logic: state returns to "start" after win is saved
