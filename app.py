@@ -116,6 +116,31 @@ def get_past_wins(phone_number):
         print(f"Error fetching wins from Airtable: {str(e)}")
         return []
 
+def get_user_state(phone_number):
+    """Get the last state for a user from Airtable"""
+    if not confessions_table:
+        return "start", None, None
+    
+    try:
+        records = confessions_table.all(
+            formula=f"{{phone}}='{phone_number}'",
+            sort=["-timestamp"]
+        )
+        if records:
+            fields = records[0].get('fields', {})
+            step = fields.get('step', 'start')
+            last_confession = fields.get('confession', '')
+            last_win = fields.get('win', '')
+            
+            if step == "win_prompt" and last_win and len(last_win.strip()) > 0:
+                return "start", last_confession, last_win
+            
+            return step, last_confession, last_win
+        return "start", None, None
+    except Exception as e:
+        print(f"Error getting user state: {str(e)}")
+        return "start", None, None
+
 def save_to_airtable(phone, confession, win, timestamp, step="start"):
     """Save conversation to Airtable"""
     if not confessions_table:
@@ -141,8 +166,6 @@ def sms_reply():
         return jsonify({"error": "Service not configured", "missing": missing_vars}), 500
     
     try:
-        session.permanent = True
-        
         incoming_msg = request.form.get('Body', '').strip().upper()
         incoming_msg_original = request.form.get('Body', '').strip()
         from_number = request.form.get('From', '')
@@ -151,9 +174,7 @@ def sms_reply():
         
         print(f"Received SMS from {from_number}: {incoming_msg}")
         
-        current_step = session.get('step', 'start')
-        last_confession = session.get('last_confession', '')
-        last_win = session.get('last_win', '')
+        current_step, last_confession, last_win = get_user_state(from_number)
         
         response_text = ""
         new_step = current_step
@@ -199,9 +220,8 @@ def sms_reply():
                 prompt = f"User said: {incoming_msg_original}. Past win: {last_win_text}. Reply in 10 calm words, counter doubt with evidence."
                 ai_response = query_gemini(prompt)
                 response_text = f"{ai_response}\n\nText a win?"
-                win_to_save = ai_response
+                win_to_save = ""
                 new_step = "win_prompt"
-                session['last_confession'] = incoming_msg_original
         
         # COACHING_CONFIRM STATE - Handle YES response
         elif current_step == "coaching_confirm":
@@ -214,17 +234,14 @@ def sms_reply():
         # WIN_PROMPT STATE
         elif current_step == "win_prompt":
             response_text = get_response_from_table("WIN_PROMPT")
+            confession_to_save = ""
             win_to_save = incoming_msg_original
-            new_step = "start"
-            session['last_win'] = incoming_msg_original
+            new_step = "win_prompt"
         
         # DEFAULT - If no state matches, prompt to start
         else:
             response_text = get_response_from_table("DEFAULT")
             new_step = "start"
-        
-        # Update session state
-        session['step'] = new_step
         
         # Save to Airtable
         save_to_airtable(
