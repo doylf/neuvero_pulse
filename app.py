@@ -280,6 +280,28 @@ def health_check():
         "service": "mybrain@work SMS service"
     }), 200
 
+@app.route('/debug/schema', methods=['GET'])
+def debug_schema():
+    """Debug endpoint to show Airtable field names"""
+    if not confessions_table:
+        return jsonify({"error": "Airtable not configured"}), 500
+    
+    try:
+        records = confessions_table.all(max_records=1)
+        if records:
+            fields = records[0].get('fields', {})
+            return jsonify({
+                "table": "Confessions",
+                "field_names": list(fields.keys()),
+                "sample_record": fields
+            })
+        return jsonify({
+            "table": "Confessions",
+            "message": "No records found. Please add at least one record to see field names."
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/', methods=['GET'])
 def home():
     """Home endpoint"""
