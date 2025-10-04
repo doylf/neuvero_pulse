@@ -8,32 +8,34 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-required_env_vars = [
-    'TWILIO_ACCOUNT_SID',
-    'TWILIO_AUTH_TOKEN', 
-    'TWILIO_PHONE_NUMBER',
-    'HUGGINGFACE_API_KEY',
-    'AIRTABLE_API_KEY',
-    'AIRTABLE_BASE_ID',
-    'AIRTABLE_TABLE_NAME'
-]
+TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
+TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
+TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
+HUGGINGFACE_API_KEY = os.environ.get('HUGGINGFACE_API_KEY', '')
+AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY', '')
+AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', '')
+AIRTABLE_TABLE_NAME = os.environ.get('AIRTABLE_TABLE_NAME', '')
 
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+required_env_vars = {
+    'TWILIO_ACCOUNT_SID': TWILIO_ACCOUNT_SID,
+    'TWILIO_AUTH_TOKEN': TWILIO_AUTH_TOKEN,
+    'TWILIO_PHONE_NUMBER': TWILIO_PHONE_NUMBER,
+    'HUGGINGFACE_API_KEY': HUGGINGFACE_API_KEY,
+    'AIRTABLE_API_KEY': AIRTABLE_API_KEY,
+    'AIRTABLE_BASE_ID': AIRTABLE_BASE_ID,
+    'AIRTABLE_TABLE_NAME': AIRTABLE_TABLE_NAME
+}
+
+missing_vars = [k for k, v in required_env_vars.items() if not v]
 if missing_vars:
-    error_msg = f"ERROR: Missing required environment variables: {', '.join(missing_vars)}"
+    error_msg = f"WARNING: Missing environment variables: {', '.join(missing_vars)}"
     print(error_msg, file=sys.stderr)
-    sys.exit(1)
 
-TWILIO_ACCOUNT_SID = os.environ['TWILIO_ACCOUNT_SID']
-TWILIO_AUTH_TOKEN = os.environ['TWILIO_AUTH_TOKEN']
-TWILIO_PHONE_NUMBER = os.environ['TWILIO_PHONE_NUMBER']
-HUGGINGFACE_API_KEY = os.environ['HUGGINGFACE_API_KEY']
-AIRTABLE_API_KEY = os.environ['AIRTABLE_API_KEY']
-AIRTABLE_BASE_ID = os.environ['AIRTABLE_BASE_ID']
-AIRTABLE_TABLE_NAME = os.environ['AIRTABLE_TABLE_NAME']
-
-airtable_api = Api(AIRTABLE_API_KEY)
-airtable_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
+airtable_api = None
+airtable_table = None
+if AIRTABLE_API_KEY and AIRTABLE_BASE_ID and AIRTABLE_TABLE_NAME:
+    airtable_api = Api(AIRTABLE_API_KEY)
+    airtable_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
 
 HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
 
@@ -70,6 +72,9 @@ def query_huggingface(prompt):
 
 def save_to_airtable(from_number, to_number, message, response, timestamp):
     """Save conversation to Airtable"""
+    if not airtable_table:
+        print("Airtable not configured - skipping save")
+        return
     try:
         record = {
             "From": from_number,
@@ -86,6 +91,9 @@ def save_to_airtable(from_number, to_number, message, response, timestamp):
 @app.route('/sms', methods=['POST'])
 def sms_reply():
     """Handle incoming SMS messages from Twilio"""
+    if missing_vars:
+        return jsonify({"error": "Service not configured", "missing": missing_vars}), 500
+    
     try:
         incoming_msg = request.form.get('Body', '').strip()
         from_number = request.form.get('From', '')
