@@ -8,7 +8,8 @@ from datetime import timedelta
 import google.generativeai as genai
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SESSION_SECRET', 'dev-secret-key-change-in-production')
+app.config['SECRET_KEY'] = os.environ.get(
+    'SESSION_SECRET', 'dev-secret-key-change-in-production')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
@@ -42,7 +43,8 @@ confessions_table = None
 responses_table = None
 if AIRTABLE_API_KEY and AIRTABLE_BASE_ID:
     airtable_api = Api(AIRTABLE_API_KEY)
-    confessions_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
+    confessions_table = airtable_api.table(AIRTABLE_BASE_ID,
+                                           AIRTABLE_TABLE_NAME)
     responses_table = airtable_api.table(AIRTABLE_BASE_ID, 'Responses')
 
 if GEMINI_API_KEY:
@@ -58,11 +60,12 @@ print(f"Airtable tables: {AIRTABLE_TABLE_NAME}, Responses")
 print(f"AI Model: Google Gemini 1.5 Flash")
 print("All environment variables validated successfully")
 
+
 def query_gemini(prompt):
     """Query Google Gemini AI with custom prompt"""
     if not gemini_model:
         return "AI service not configured. Please add GEMINI_API_KEY."
-    
+
     try:
         response = gemini_model.generate_content(prompt)
         return response.text.strip()
@@ -70,11 +73,12 @@ def query_gemini(prompt):
         print(f"Error querying Gemini AI: {str(e)}")
         return "I'm having trouble. Try again later."
 
+
 def get_response_from_table(trigger):
     """Fetch response text from Responses table by Trigger"""
     if not responses_table:
         return f"Response table not configured (trigger: {trigger})"
-    
+
     try:
         records = responses_table.all(formula=f"{{Trigger}}='{trigger}'")
         if records:
@@ -85,11 +89,12 @@ def get_response_from_table(trigger):
         print(f"Error fetching response from table: {str(e)}")
         return "System error. Please try again."
 
+
 def classify_message(message):
     """Classify message as EMERGENCY, NORMAL, or COACHING"""
     prompt = f"Classify in ONE word: EMERGENCY, NORMAL, or COACHING. EMERGENCY: suicide, self-harm. COACHING: advice, 'what do I do'. NORMAL: venting, doubt. Text: {message}"
     classification = query_gemini(prompt).upper()
-    
+
     if "EMERGENCY" in classification:
         return "EMERGENCY"
     elif "COACHING" in classification:
@@ -97,11 +102,12 @@ def classify_message(message):
     else:
         return "NORMAL"
 
+
 def get_past_wins(phone_number):
     """Fetch past user-reported wins from Airtable where step=win_prompt"""
     if not confessions_table:
         return []
-    
+
     try:
         formula = f"AND({{phone}}='{phone_number}', {{step}}='win_prompt')"
         records = confessions_table.all(formula=formula)
@@ -116,35 +122,36 @@ def get_past_wins(phone_number):
         print(f"Error fetching wins from Airtable: {str(e)}")
         return []
 
+
 def get_user_state(phone_number):
     """Get the last state for a user from Airtable"""
     if not confessions_table:
         return "start", None, None
-    
+
     try:
-        records = confessions_table.all(
-            formula=f"{{phone}}='{phone_number}'",
-            sort=["-timestamp"]
-        )
+        records = confessions_table.all(formula=f"{{phone}}='{phone_number}'",
+                                        sort=["-timestamp"])
         if records:
             fields = records[0].get('fields', {})
             step = fields.get('step', 'start')
             last_confession = fields.get('confession', '')
             last_win = fields.get('win', '')
-            
+
             if step == "win_prompt" and last_win and len(last_win.strip()) > 0:
                 return "start", last_confession, last_win
-            
+
             return step, last_confession, last_win
         return "start", None, None
     except Exception as e:
         print(f"Error getting user state: {str(e)}")
         return "start", None, None
 
+
 def save_to_airtable(phone, confession, win, step="start"):
     """Save conversation to Airtable (timestamp is auto-computed by Airtable)"""
     if not confessions_table:
-        print("ERROR: Airtable Confessions table not configured - skipping save")
+        print(
+            "ERROR: Airtable Confessions table not configured - skipping save")
         return False
     try:
         record = {
@@ -153,9 +160,13 @@ def save_to_airtable(phone, confession, win, step="start"):
             "win": win,
             "step": step
         }
-        print(f"Attempting to save to Airtable: phone={phone}, step={step}, confession={confession[:50] if confession else 'empty'}..., win={win[:50] if win else 'empty'}")
+        print(
+            f"Attempting to save to Airtable: phone={phone}, step={step}, confession={confession[:50] if confession else 'empty'}..., win={win[:50] if win else 'empty'}"
+        )
         result = confessions_table.create(record)
-        print(f"SUCCESS: Saved to Airtable with record ID: {result.get('id', 'unknown')}")
+        print(
+            f"SUCCESS: Saved to Airtable with record ID: {result.get('id', 'unknown')}"
+        )
         return True
     except Exception as e:
         print(f"ERROR saving to Airtable: {str(e)}")
@@ -163,33 +174,39 @@ def save_to_airtable(phone, confession, win, step="start"):
         traceback.print_exc()
         return False
 
+
 @app.route('/sms', methods=['POST'])
 def sms_reply():
     """Handle incoming SMS messages from Twilio"""
     if missing_vars:
-        return jsonify({"error": "Service not configured", "missing": missing_vars}), 500
-    
+        return jsonify({
+            "error": "Service not configured",
+            "missing": missing_vars
+        }), 500
+
     try:
         incoming_msg = request.form.get('Body', '').strip().upper()
         incoming_msg_original = request.form.get('Body', '').strip()
         from_number = request.form.get('From', '')
         to_number = request.form.get('To', '')
-        
+
         print(f"Received SMS from {from_number}: {incoming_msg}")
-        
+
         current_step, last_confession, last_win = get_user_state(from_number)
-        print(f"Current state: step={current_step}, last_confession={last_confession}, last_win={last_win}")
-        
+        print(
+            f"Current state: step={current_step}, last_confession={last_confession}, last_win={last_win}"
+        )
+
         response_text = ""
         new_step = current_step
         confession_to_save = incoming_msg_original
         win_to_save = ""
-        
+
         # START STATE - Check for OUCH trigger
         if incoming_msg == "OUCH":
             response_text = get_response_from_table("SUBSCRIBE")
             new_step = "opt_in"
-        
+
         # OPT-IN STATE
         elif current_step == "opt_in":
             if incoming_msg == "HELP":
@@ -199,35 +216,37 @@ def sms_reply():
                 response_text = get_response_from_table("STOP")
                 new_step = "start"
             elif incoming_msg in ["1", "2", "3"]:
-                trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
+                trigger_map = {"1": "CO-WORKER", "2": "BOSS", "3": "SELF"}
                 trigger = trigger_map[incoming_msg]
                 response_text = get_response_from_table(trigger)
                 new_step = "confess"
                 confession_to_save = trigger
             else:
                 response_text = "Please text 1, 2, or 3 for Co-worker, Boss, or self-doubt, or HELP/STOP"
-        
+
         # CONFESS STATE
         elif current_step == "confess":
             classification = classify_message(incoming_msg_original)
-            
+
             if classification == "EMERGENCY":
                 response_text = get_response_from_table("EMERGENCY")
                 new_step = "start"
             elif classification == "COACHING":
-                response_text = get_response_from_table("COACHING_CONFIRM_PROMPT")
+                response_text = get_response_from_table(
+                    "COACHING_CONFIRM_PROMPT")
                 new_step = "coaching_confirm"
             else:  # NORMAL
                 past_wins = get_past_wins(from_number)
                 last_win_text = past_wins[-1] if past_wins else "none"
-                
-                trigger_context = last_confession.lower() if last_confession else "workplace"
+
+                trigger_context = last_confession.lower(
+                ) if last_confession else "workplace"
                 prompt = f"User said: {incoming_msg_original}. Context: {trigger_context} issue. Past win: {last_win_text}. Reply in 10 calm words, address workplace frustration with evidence."
                 ai_response = query_gemini(prompt)
                 response_text = f"{ai_response}\n\nText a win?"
                 win_to_save = ""
                 new_step = "win_prompt"
-        
+
         # COACHING_CONFIRM STATE - Handle YES response
         elif current_step == "coaching_confirm":
             if incoming_msg == "YES":
@@ -235,33 +254,31 @@ def sms_reply():
             else:
                 response_text = get_response_from_table("COACHING_CONFIRM_NO")
             new_step = "start"
-        
+
         # WIN_PROMPT STATE
         elif current_step == "win_prompt":
             response_text = get_response_from_table("WIN_PROMPT")
             confession_to_save = ""
             win_to_save = incoming_msg_original
             new_step = "win_prompt"
-        
+
         # DEFAULT - If no state matches, prompt to start
         else:
             response_text = get_response_from_table("DEFAULT")
             new_step = "start"
-        
+
         # Save to Airtable
-        save_to_airtable(
-            phone=from_number,
-            confession=confession_to_save,
-            win=win_to_save,
-            step=new_step
-        )
-        
+        save_to_airtable(phone=from_number,
+                         confession=confession_to_save,
+                         win=win_to_save,
+                         step=new_step)
+
         # Send response via Twilio
         resp = MessagingResponse()
         resp.message(response_text)
-        
+
         return str(resp), 200, {'Content-Type': 'text/xml'}
-    
+
     except Exception as e:
         print(f"Error processing SMS: {str(e)}")
         import traceback
@@ -269,6 +286,7 @@ def sms_reply():
         resp = MessagingResponse()
         resp.message("Sorry, I encountered an error processing your message.")
         return str(resp), 200, {'Content-Type': 'text/xml'}
+
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -278,12 +296,13 @@ def health_check():
         "service": "mybrain@work SMS service"
     }), 200
 
+
 @app.route('/debug/schema', methods=['GET'])
 def debug_schema():
     """Debug endpoint to show Airtable field names"""
     if not confessions_table:
         return jsonify({"error": "Airtable not configured"}), 500
-    
+
     try:
         records = confessions_table.all(max_records=1)
         if records:
@@ -294,11 +313,14 @@ def debug_schema():
                 "sample_record": fields
             })
         return jsonify({
-            "table": "Confessions",
-            "message": "No records found. Please add at least one record to see field names."
+            "table":
+            "Confessions",
+            "message":
+            "No records found. Please add at least one record to see field names."
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/', methods=['GET'])
 def home():
@@ -307,6 +329,7 @@ def home():
         "message": "mybrain@work SMS service is running",
         "webhook_endpoint": "/sms"
     }), 200
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=False)
