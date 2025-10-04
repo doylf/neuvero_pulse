@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify, session
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 from pyairtable import Api
-from datetime import datetime, timedelta
+from datetime import timedelta
 import google.generativeai as genai
 
 app = Flask(__name__)
@@ -141,8 +141,8 @@ def get_user_state(phone_number):
         print(f"Error getting user state: {str(e)}")
         return "start", None, None
 
-def save_to_airtable(phone, confession, win, timestamp, step="start"):
-    """Save conversation to Airtable"""
+def save_to_airtable(phone, confession, win, step="start"):
+    """Save conversation to Airtable (timestamp is auto-computed by Airtable)"""
     if not confessions_table:
         print("ERROR: Airtable Confessions table not configured - skipping save")
         return False
@@ -151,7 +151,6 @@ def save_to_airtable(phone, confession, win, timestamp, step="start"):
             "phone": phone,
             "confession": confession,
             "win": win,
-            "timestamp": timestamp,
             "step": step
         }
         print(f"Attempting to save to Airtable: phone={phone}, step={step}, confession={confession[:50] if confession else 'empty'}..., win={win[:50] if win else 'empty'}")
@@ -175,7 +174,6 @@ def sms_reply():
         incoming_msg_original = request.form.get('Body', '').strip()
         from_number = request.form.get('From', '')
         to_number = request.form.get('To', '')
-        timestamp = datetime.now().isoformat()
         
         print(f"Received SMS from {from_number}: {incoming_msg}")
         
@@ -254,7 +252,6 @@ def sms_reply():
             phone=from_number,
             confession=confession_to_save,
             win=win_to_save,
-            timestamp=timestamp,
             step=new_step
         )
         
