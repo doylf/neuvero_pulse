@@ -1,0 +1,21 @@
+Update app.py for the mybrain@work SMS Service SMS chatbot. Use Flask, Twilio, google-generativeai, pyairtable. Use environment variables (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, GEMINI_API_KEY, AIRTABLE_API_KEY, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME) from Secrets. The Airtable table "Confessions" has fields: ID (Auto Number), Phone (Single Line Text), Confession (Single Line Text), Win (Single Line Text), Timestamp (Date/Time), Step (Single Select: opt_in, confess, win_prompt, confirm, proof). The "Responses" table has: Trigger (Single Line Text), Prompt (Long Text), ResponseType (Single Select: EMERGENCY, NORMAL, COACHING, HELP, STOP), Weight (Number). Follow this logic:
+
+1. Environment: Initialize Twilio client, Airtable table ("Confessions"), Gemini with genai.configure(api_key=GEMINI_API_KEY) and genai.GenerativeModel('gemini-1.5-flash').
+2. Webhook (/sms POST): 
+   - Input: Twilio POST with Body, From, To.
+   - State: Use cookies for step (start, opt_in, confess), last_confession, last_win (1-hour expiration).
+   - Flow:
+     - Start (OUCH): Fetch reply from Responses table where Trigger="SUBSCRIBE", set step to opt_in.
+     - Opt-in: If 1/2/3, map to Co-worker/Boss/Self-doubt, ask "What’s the exact lie? Two words max.", set step to confess. If HELP, reply from Responses table where Trigger="HELP", set start. If STOP, reply from Responses table where Trigger="STOP", set start. Else, reprompt with "Please text 1, 2, or 3 for Co-worker, Boss, or self-doubt, or HELP/STOP".
+     - Confess: Classify inline with Gemini (prompt "Classify in ONE word: EMERGENCY, NORMAL, or COACHING. EMERGENCY: suicide, self-harm. COACHING: advice, 'what do I do'. NORMAL: venting, doubt. Text: {message}"). If EMERGENCY, reply from Responses table where Trigger="EMERGENCY", set start. If COACHING, reply from Responses table where Trigger="COACHING_CONFIRM_PROMPT", set coaching_confirm. If NORMAL, fetch wins from Airtable (filter by Phone where step="win_prompt"), prompt Gemini with Prompt from Responses where Trigger matches confession keyword (e.g., "FRAUD") with {message} and {last_win or 'none'}, reply with result + "Text a win?", set last_confession, step to win_prompt.
+     - Coaching Confirm: Fetch reply from Responses table where Trigger="COACHING_CONFIRM_YES" if "YES", else Trigger="COACHING_CONFIRM_NO", set start.
+     - Win Prompt: Save user’s input as win, reply from Responses table where Trigger="WIN_PROMPT", set start.
+     - Default: Reply from Responses table where Trigger="DEFAULT", set start.
+   - Save: Call save_to_airtable with phone, confession (message), win (user input), timestamp, step.
+3. query_gemini(prompt): Use model.generate_content(prompt).text.strip(), handle errors with "I’m having trouble. Try again later."
+4. get_past_wins(phone): Fetch non-empty wins from Airtable where step="win_prompt".
+5. save_to_airtable(phone, confession, win, timestamp, step): Create Airtable record, log errors.
+6. /health and /: Return JSON status.
+7. Run: host=0.0.0.0, port=8000, debug=False.
+
+Ensure Airtable "Responses" drives all replies, match confessions to Triggers for NORMAL responses, fix win_prompt to save user input, and retain mybrain@work branding. Use existing functions where possible.

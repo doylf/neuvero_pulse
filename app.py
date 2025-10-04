@@ -1,14 +1,15 @@
 import os
 import sys
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify, session
 from twilio.twiml.messaging_response import MessagingResponse
-import requests
+from twilio.rest import Client
 from pyairtable import Api
 from datetime import datetime, timedelta
 import google.generativeai as genai
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SESSION_SECRET', 'dev-secret-key-change-in-production')
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
@@ -16,7 +17,7 @@ TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY', '')
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', '')
-AIRTABLE_TABLE_NAME = os.environ.get('AIRTABLE_TABLE_NAME', '')
+AIRTABLE_TABLE_NAME = os.environ.get('AIRTABLE_TABLE_NAME', 'Confessions')
 
 required_env_vars = {
     'TWILIO_ACCOUNT_SID': TWILIO_ACCOUNT_SID,
@@ -24,8 +25,7 @@ required_env_vars = {
     'TWILIO_PHONE_NUMBER': TWILIO_PHONE_NUMBER,
     'GEMINI_API_KEY': GEMINI_API_KEY,
     'AIRTABLE_API_KEY': AIRTABLE_API_KEY,
-    'AIRTABLE_BASE_ID': AIRTABLE_BASE_ID,
-    'AIRTABLE_TABLE_NAME': AIRTABLE_TABLE_NAME
+    'AIRTABLE_BASE_ID': AIRTABLE_BASE_ID
 }
 
 missing_vars = [k for k, v in required_env_vars.items() if not v]
@@ -33,23 +33,29 @@ if missing_vars:
     error_msg = f"WARNING: Missing environment variables: {', '.join(missing_vars)}"
     print(error_msg, file=sys.stderr)
 
+twilio_client = None
+if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
 airtable_api = None
-airtable_table = None
-if AIRTABLE_API_KEY and AIRTABLE_BASE_ID and AIRTABLE_TABLE_NAME:
+confessions_table = None
+responses_table = None
+if AIRTABLE_API_KEY and AIRTABLE_BASE_ID:
     airtable_api = Api(AIRTABLE_API_KEY)
-    airtable_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
+    confessions_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
+    responses_table = airtable_api.table(AIRTABLE_BASE_ID, 'Responses')
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
 else:
     gemini_model = None
 
 print("=== mybrain@work SMS Service Starting ===")
 print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
 print(f"Airtable base: {AIRTABLE_BASE_ID}")
-print(f"Airtable table: {AIRTABLE_TABLE_NAME}")
-print(f"AI Model: Google Gemini 2.0 Flash")
+print(f"Airtable tables: {AIRTABLE_TABLE_NAME}, Responses")
+print(f"AI Model: Google Gemini 1.5 Flash")
 print("All environment variables validated successfully")
 
 def query_gemini(prompt):
@@ -64,6 +70,21 @@ def query_gemini(prompt):
         print(f"Error querying Gemini AI: {str(e)}")
         return "I'm having trouble. Try again later."
 
+def get_response_from_table(trigger):
+    """Fetch response text from Responses table by Trigger"""
+    if not responses_table:
+        return f"Response table not configured (trigger: {trigger})"
+    
+    try:
+        records = responses_table.all(formula=f"{{Trigger}}='{trigger}'")
+        if records:
+            fields = records[0].get('fields', {})
+            return fields.get('Prompt', f"No response found for {trigger}")
+        return f"No response found for trigger: {trigger}"
+    except Exception as e:
+        print(f"Error fetching response from table: {str(e)}")
+        return "System error. Please try again."
+
 def classify_message(message):
     """Classify message as EMERGENCY, NORMAL, or COACHING"""
     prompt = f"Classify in ONE word: EMERGENCY, NORMAL, or COACHING. EMERGENCY: suicide, self-harm. COACHING: advice, 'what do I do'. NORMAL: venting, doubt. Text: {message}"
@@ -77,20 +98,17 @@ def classify_message(message):
         return "NORMAL"
 
 def get_past_wins(phone_number):
-    """Fetch past user-reported wins from Airtable (not AI responses)"""
-    if not airtable_table:
+    """Fetch past user-reported wins from Airtable where step=win_prompt"""
+    if not confessions_table:
         return []
     
     try:
-        # Only fetch wins where step is "start" (user-submitted wins after win_prompt)
-        # step="win_prompt" contains AI responses, step="start" contains user wins
-        formula = f"AND({{phone}}='{phone_number}', {{step}}='start')"
-        records = airtable_table.all(formula=formula)
+        formula = f"AND({{phone}}='{phone_number}', {{step}}='win_prompt')"
+        records = confessions_table.all(formula=formula)
         wins = []
         for record in records:
             fields = record.get('fields', {})
             win = fields.get('win', '').strip()
-            # Only include non-empty wins
             if win and len(win) > 0:
                 wins.append(win)
         return wins
@@ -100,7 +118,7 @@ def get_past_wins(phone_number):
 
 def save_to_airtable(phone, confession, win, timestamp, step="start"):
     """Save conversation to Airtable"""
-    if not airtable_table:
+    if not confessions_table:
         print("Airtable not configured - skipping save")
         return
     try:
@@ -111,31 +129,10 @@ def save_to_airtable(phone, confession, win, timestamp, step="start"):
             "timestamp": timestamp,
             "step": step
         }
-        airtable_table.create(record)
+        confessions_table.create(record)
         print(f"Saved to Airtable: {phone} -> {confession[:50]}...")
     except Exception as e:
         print(f"Error saving to Airtable: {str(e)}")
-
-def get_user_state(phone_number):
-    """Get the last state for a user from Airtable"""
-    if not airtable_table:
-        return "start", None, None
-    
-    try:
-        records = airtable_table.all(
-            formula=f"{{phone}}='{phone_number}'",
-            sort=["-timestamp"]
-        )
-        if records:
-            fields = records[0].get('fields', {})
-            step = fields.get('step', 'start')
-            last_confession = fields.get('confession', '')
-            last_win = fields.get('win', '')
-            return step, last_confession, last_win
-        return "start", None, None
-    except Exception as e:
-        print(f"Error getting user state: {str(e)}")
-        return "start", None, None
 
 @app.route('/sms', methods=['POST'])
 def sms_reply():
@@ -144,6 +141,8 @@ def sms_reply():
         return jsonify({"error": "Service not configured", "missing": missing_vars}), 500
     
     try:
+        session.permanent = True
+        
         incoming_msg = request.form.get('Body', '').strip().upper()
         incoming_msg_original = request.form.get('Body', '').strip()
         from_number = request.form.get('From', '')
@@ -152,7 +151,10 @@ def sms_reply():
         
         print(f"Received SMS from {from_number}: {incoming_msg}")
         
-        current_step, last_confession, last_win = get_user_state(from_number)
+        current_step = session.get('step', 'start')
+        last_confession = session.get('last_confession', '')
+        last_win = session.get('last_win', '')
+        
         response_text = ""
         new_step = current_step
         confession_to_save = incoming_msg_original
@@ -160,16 +162,16 @@ def sms_reply():
         
         # START STATE - Check for OUCH trigger
         if incoming_msg == "OUCH":
-            response_text = "Welcome to Neuvero.ai - you're opted into career tips via text. Text HELP for support or STOP to unsubscribe. What made you say OUCH - Co-worker, Boss or self-doubt? Text 1, 2 or 3"
+            response_text = get_response_from_table("SUBSCRIBE")
             new_step = "opt_in"
         
         # OPT-IN STATE
         elif current_step == "opt_in":
             if incoming_msg == "HELP":
-                response_text = "Text OUCH for tips or STOP to end"
+                response_text = get_response_from_table("HELP")
                 new_step = "start"
             elif incoming_msg == "STOP":
-                response_text = "You're unsubscribed. Text OUCH to restart"
+                response_text = get_response_from_table("STOP")
                 new_step = "start"
             elif incoming_msg in ["1", "2", "3"]:
                 trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
@@ -178,17 +180,17 @@ def sms_reply():
                 new_step = "confess"
                 confession_to_save = trigger
             else:
-                response_text = "Please text 1, 2, or 3 to tell me what made you say OUCH"
+                response_text = "Please text 1, 2, or 3 for Co-worker, Boss, or self-doubt, or HELP/STOP"
         
         # CONFESS STATE
         elif current_step == "confess":
             classification = classify_message(incoming_msg_original)
             
             if classification == "EMERGENCY":
-                response_text = "That sounds urgent. Text 988 for free crisis support now."
+                response_text = get_response_from_table("EMERGENCY")
                 new_step = "start"
             elif classification == "COACHING":
-                response_text = "Need real talk? Text YES for a 10-min call: go.neuvero.ai/book-floyd"
+                response_text = get_response_from_table("COACHING_CONFIRM_PROMPT")
                 new_step = "coaching_confirm"
             else:  # NORMAL
                 past_wins = get_past_wins(from_number)
@@ -199,26 +201,30 @@ def sms_reply():
                 response_text = f"{ai_response}\n\nText a win?"
                 win_to_save = ai_response
                 new_step = "win_prompt"
+                session['last_confession'] = incoming_msg_original
         
         # COACHING_CONFIRM STATE - Handle YES response
         elif current_step == "coaching_confirm":
             if incoming_msg == "YES":
-                response_text = "Great! Book your call here: go.neuvero.ai/book-floyd. Text OUCH anytime for support."
-                new_step = "start"
+                response_text = get_response_from_table("COACHING_CONFIRM_YES")
             else:
-                response_text = "No problem. Text OUCH anytime you need support."
-                new_step = "start"
+                response_text = get_response_from_table("COACHING_CONFIRM_NO")
+            new_step = "start"
         
         # WIN_PROMPT STATE
         elif current_step == "win_prompt":
-            response_text = "Thanks for sharing! Text OUCH anytime you need support."
+            response_text = get_response_from_table("WIN_PROMPT")
             win_to_save = incoming_msg_original
             new_step = "start"
+            session['last_win'] = incoming_msg_original
         
         # DEFAULT - If no state matches, prompt to start
         else:
-            response_text = "Text OUCH to get started with career coaching support"
+            response_text = get_response_from_table("DEFAULT")
             new_step = "start"
+        
+        # Update session state
+        session['step'] = new_step
         
         # Save to Airtable
         save_to_airtable(
