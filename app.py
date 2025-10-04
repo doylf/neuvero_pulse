@@ -144,8 +144,8 @@ def get_user_state(phone_number):
 def save_to_airtable(phone, confession, win, timestamp, step="start"):
     """Save conversation to Airtable"""
     if not confessions_table:
-        print("Airtable not configured - skipping save")
-        return
+        print("ERROR: Airtable Confessions table not configured - skipping save")
+        return False
     try:
         record = {
             "phone": phone,
@@ -154,10 +154,15 @@ def save_to_airtable(phone, confession, win, timestamp, step="start"):
             "timestamp": timestamp,
             "step": step
         }
-        confessions_table.create(record)
-        print(f"Saved to Airtable: {phone} -> {confession[:50]}...")
+        print(f"Attempting to save to Airtable: phone={phone}, step={step}, confession={confession[:50] if confession else 'empty'}..., win={win[:50] if win else 'empty'}")
+        result = confessions_table.create(record)
+        print(f"SUCCESS: Saved to Airtable with record ID: {result.get('id', 'unknown')}")
+        return True
     except Exception as e:
-        print(f"Error saving to Airtable: {str(e)}")
+        print(f"ERROR saving to Airtable: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 @app.route('/sms', methods=['POST'])
 def sms_reply():
@@ -175,6 +180,7 @@ def sms_reply():
         print(f"Received SMS from {from_number}: {incoming_msg}")
         
         current_step, last_confession, last_win = get_user_state(from_number)
+        print(f"Current state: step={current_step}, last_confession={last_confession}, last_win={last_win}")
         
         response_text = ""
         new_step = current_step
@@ -197,7 +203,7 @@ def sms_reply():
             elif incoming_msg in ["1", "2", "3"]:
                 trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
                 trigger = trigger_map[incoming_msg]
-                response_text = f"{trigger}. What's the exact lie? Two words max."
+                response_text = get_response_from_table(trigger)
                 new_step = "confess"
                 confession_to_save = trigger
             else:
