@@ -10,13 +10,14 @@ app = Flask(__name__)
 
 required_env_vars = [
     'TWILIO_ACCOUNT_SID',
-    'TWILIO_AUTH_TOKEN',
+    'TWILIO_AUTH_TOKEN', 
     'TWILIO_PHONE_NUMBER',
     'HUGGINGFACE_API_KEY',
     'AIRTABLE_API_KEY',
     'AIRTABLE_BASE_ID',
     'AIRTABLE_TABLE_NAME'
 ]
+
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
     error_msg = f"ERROR: Missing required environment variables: {', '.join(missing_vars)}"
@@ -33,30 +34,42 @@ AIRTABLE_TABLE_NAME = os.environ['AIRTABLE_TABLE_NAME']
 
 airtable_api = Api(AIRTABLE_API_KEY)
 airtable_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
+
 HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
 
-print("=== FMC: Fraud Meets Clarity SMS Service Starting ===")
+print("=== mybrain@work SMS Service Starting ===")
 print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
 print(f"Airtable base: {AIRTABLE_BASE_ID}")
 print(f"Airtable table: {AIRTABLE_TABLE_NAME}")
 print("All environment variables validated successfully")
 
 def query_huggingface(prompt):
+    """Query Hugging Face LLM for a response"""
     headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
     payload = {
         "inputs": prompt,
-        "parameters": {"max_new_tokens": 250, "temperature": 0.7, "top_p": 0.9, "return_full_text": False}
+        "parameters": {
+            "max_new_tokens": 250,
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "return_full_text": False
+        }
     }
+    
     try:
         response = requests.post(HUGGINGFACE_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         result = response.json()
-        return result[0].get('generated_text', '').strip() if isinstance(result, list) and len(result) > 0 else "Error generating response."
+        
+        if isinstance(result, list) and len(result) > 0:
+            return result[0].get('generated_text', '').strip()
+        return "I'm sorry, I couldn't generate a response at this time."
     except Exception as e:
         print(f"Error querying Hugging Face: {str(e)}")
-        return "I'm having trouble. Try again later."
+        return "I'm having trouble thinking right now. Please try again later."
 
 def save_to_airtable(from_number, to_number, message, response, timestamp):
+    """Save conversation to Airtable"""
     try:
         record = {
             "From": from_number,
@@ -72,75 +85,47 @@ def save_to_airtable(from_number, to_number, message, response, timestamp):
 
 @app.route('/sms', methods=['POST'])
 def sms_reply():
+    """Handle incoming SMS messages from Twilio"""
     try:
-        incoming_msg = request.form.get('Body', '').strip().upper()
+        incoming_msg = request.form.get('Body', '').strip()
         from_number = request.form.get('From', '')
         to_number = request.form.get('To', '')
         timestamp = datetime.now().isoformat()
+        
         print(f"Received SMS from {from_number}: {incoming_msg}")
-
+        
+        prompt = f"You are a helpful AI assistant. A user sent you this message: '{incoming_msg}'. Provide a brief, friendly, and helpful response."
+        
+        ai_response = query_huggingface(prompt)
+        
+        save_to_airtable(from_number, to_number, incoming_msg, ai_response, timestamp)
+        
         resp = MessagingResponse()
-        msg = resp.message()
-
-        user_state = {k: eval(v) for k, v in request.cookies.items()} if request.cookies else {}
-        user_state = user_state.get(from_number, {"step": "start", "last_confession": "", "last_win": ""})
-
-        if user_state["step"] == "start" and incoming_msg == "OUCH":
-            msg.body("Welcome to Neuvero.ai - you’re opted into career tips via text. Text HELP for support or STOP to unsubscribe. What made you say OUCH - Co-worker, Boss or self-doubt? Text 1, 2 or 3")
-            user_state["step"] = "opt_in"
-
-        elif user_state["step"] == "opt_in":
-            if incoming_msg in ["1", "2", "3"]:
-                options = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
-                msg.body(f"{options[incoming_msg]} sting? What’s the exact lie? Two words max.")
-                user_state["step"] = "confess"
-            elif incoming_msg == "HELP":
-                msg.body("Text OUCH for confidence boosts or STOP to end.")
-                user_state["step"] = "start"
-            elif incoming_msg == "STOP":
-                msg.body("You’re unsubscribed. Text OUCH to restart.")
-                user_state["step"] = "start"
-            else:
-                msg.body("Text 1, 2, or 3 for Co-worker, Boss, or self-doubt, or HELP/STOP")
-
-        elif user_state["step"] == "confess":
-            classify_prompt = f"Classify in ONE word: EMERGENCY, NORMAL, or COACHING.\nEMERGENCY: suicide, self-harm.\nCOACHING: advice, 'what do I do'.\nNORMAL: venting, doubt.\nText: {incoming_msg}"
-            category = query_huggingface(classify_prompt).strip().upper()
-
-            if category == "EMERGENCY":
-                msg.body("That sounds urgent. Text 988 for free crisis support now.")
-            elif category == "COACHING":
-                msg.body("Need real talk? Text YES for a 10-min call: [go.neuvero.ai/book-floyd]")
-            else:  # NORMAL
-                records = airtable_table.all(formula=f"{{From}}='{from_number}'")
-                last_win = next((r['fields'].get('Win') for r in records if r['fields'].get('Win')), "")
-                prompt = f"User said: {incoming_msg}. Past win: {last_win or 'none'}. Reply in 10 calm words, counter doubt with evidence."
-                ai_response = query_huggingface(prompt)
-                msg.body(ai_response + " Text a win?")
-                user_state["last_confession"] = incoming_msg
-
-            save_to_airtable(from_number, to_number, incoming_msg, msg.body[0].text if msg.body else "", timestamp)
-            if "win" in msg.body[0].text.lower():
-                user_state["step"] = "win_prompt"
-            else:
-                user_state["step"] = "start"
-
-        resp.set_cookie(from_number, str(user_state), max_age=3600)  # 1-hour session
+        resp.message(ai_response)
+        
         return str(resp), 200, {'Content-Type': 'text/xml'}
-
+    
     except Exception as e:
         print(f"Error processing SMS: {str(e)}")
         resp = MessagingResponse()
-        resp.message("Sorry, I encountered an error.")
+        resp.message("Sorry, I encountered an error processing your message.")
         return str(resp), 200, {'Content-Type': 'text/xml'}
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "healthy", "service": "FMC SMS Service"}), 200
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "service": "mybrain@work SMS service"
+    }), 200
 
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "FMC SMS Service is running", "webhook_endpoint": "/sms"}), 200
+    """Home endpoint"""
+    return jsonify({
+        "message": "mybrain@work SMS service is running",
+        "webhook_endpoint": "/sms"
+    }), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=False)
