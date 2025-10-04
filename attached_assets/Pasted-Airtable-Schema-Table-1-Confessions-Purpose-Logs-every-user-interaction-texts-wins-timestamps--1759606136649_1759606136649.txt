@@ -1,0 +1,95 @@
+Airtable Schema
+Table 1: Confessions
+
+Purpose: Logs every user interaction (texts, wins, timestamps) for a full history and evidence board.
+Fields:
+
+ID (Auto Number):
+
+Datatype: Auto Number (Primary Field)
+Sample Value: 1, 2, 3…
+Intention: Unique identifier for each confession record.
+
+
+Phone (Single Line Text):
+
+Datatype: Single Line Text
+Sample Value: +15551234567
+Intention: Tracks the user’s Twilio number, allowing multiple entries per phone.
+
+
+Confession (Single Line Text):
+
+Datatype: Single Line Text
+Sample Value: “Terrible presentation”, “I’m a fraud”
+Intention: Stores the user’s input for analysis and LLM context.
+
+
+Win (Single Line Text):
+
+Datatype: Single Line Text
+Sample Value: “Led meeting”, “” (blank)
+Intention: Logs user-reported wins for the evidence board.
+
+
+Timestamp (Date/Time):
+
+Datatype: Date/Time
+Sample Value: 2025-10-04T15:25:00Z
+Intention: Records when the confession was made (auto-set to “Created time”).
+
+
+Step (Single Select):
+
+Datatype: Single Select
+Sample Value: “opt_in”, “confess”, “win_prompt”
+Options: opt_in, confess, win_prompt, confirm, proof
+Intention: Tracks the user’s current flow state.
+
+
+
+
+
+Table 2: Responses
+
+Purpose: Defines triggers, Gemini prompts, and response types to guide the bot’s replies.
+Fields:
+
+Trigger (Single Line Text):
+
+Datatype: Single Line Text
+Sample Value: “SUICIDE”, “HELP”, “COACH”
+Intention: Matches user input to determine response behavior.
+
+
+Prompt (Long Text):
+
+Datatype: Long Text
+Sample Value: “Classify as EMERGENCY”, “Reply: Text OUCH for tips…”
+Intention: Provides Gemini instructions with placeholders (e.g., {{confession}}).
+
+
+ResponseType (Single Select):
+
+Datatype: Single Select
+Sample Value: “EMERGENCY”, “HELP”, “COACHING”
+Options: EMERGENCY, NORMAL, COACHING, HELP, STOP
+Intention: Routes the response (e.g., 988 for emergency).
+
+
+Weight (Number):
+
+Datatype: Number
+Sample Value: 5, 1
+Intention: Prioritizes triggers if multiple match (higher wins).
+
+
+
+
+Sample Rows:
+
+Trigger: “SUICIDE” | Prompt: “Classify as EMERGENCY” | ResponseType: “EMERGENCY” | Weight: 5
+Trigger: “HELP” | Prompt: “Reply: Text OUCH for tips or STOP to end” | ResponseType: “HELP” | Weight: 1
+Trigger: “STOP” | Prompt: “Reply: You’re unsubscribed. Text OUCH to restart” | ResponseType: “STOP” | Weight: 1
+Trigger: “COACH” | Prompt: “Reply: Book a 10-min call: [go.neuvero.ai/book-floyd]” | ResponseType: “COACHING” | Weight: 1
+Trigger: “FRAUD” | Prompt: “User said: {{confession}}. Win: {{win}}. Reply in 10 calm words, counter doubt.” | ResponseType: “NORMAL” | Weight: 1
