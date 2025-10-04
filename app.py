@@ -70,11 +70,13 @@ def query_huggingface(prompt):
         if 'choices' in result and len(result['choices']) > 0:
             return result['choices'][0]['message']['content'].strip()
         return "I'm sorry, I couldn't generate a response at this time."
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         print(f"Error querying Hugging Face: {str(e)}")
-        if 'response' in locals():
+        try:
             print(f"Response status: {response.status_code}")
             print(f"Response body: {response.text[:500]}")
+        except:
+            pass
         return "I'm having trouble thinking right now. Please try again later."
 
 def save_to_airtable(from_number, to_number, message, response, timestamp):
