@@ -39,11 +39,12 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
    - Handles API errors gracefully
 
 4. **Airtable Storage**
-   - **Confessions Table Fields**: id, phone, confession, win, timestamp, step, conversation_id, conversation_type
+   - **Confessions Table Fields**: id, phone, confession, win, timestamp, step, conversation_id, conversation_type, gemini_prompt, gemini_response
    - Tracks complete interaction history per user
    - **Conversation Tracking**: Each conversation gets unique UUID (conversation_id) generated on "OUCH"
    - **Conversation Scoping**: Past wins are scoped to current conversation_id
    - **Conversation Type**: Tracks selected trigger (Co-worker/Boss/Self-doubt) throughout conversation
+   - **AI Transparency**: Stores both the prompt sent to Gemini and the AI-generated response for analysis
    - State persistence through step field
 
 ### API Endpoints
@@ -81,6 +82,8 @@ Your Airtable "Confessions" table should have these fields:
 - `step` (Single Select: opt_in, confess, win_prompt, start, coaching_confirm) - Current conversation state
 - `conversation_id` (Single line text) - UUID for tracking conversation sessions
 - `conversation_type` (Single line text) - Selected trigger (Co-worker/Boss/Self-doubt)
+- `gemini_prompt` (Long text) - The prompt sent to Gemini AI for response generation
+- `gemini_response` (Long text) - The response received from Gemini AI (sent to customer)
 
 ## Running the Application
 The application runs on port 8000 using Gunicorn with the command:
@@ -116,3 +119,8 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
   - Fixed win tracking: wins saved with step="win_prompt" for proper retrieval
   - Removed session/cookie dependencies (fully stateless webhook design)
   - Updated Airtable schema: added conversation_id and conversation_type fields
+- 2025-10-05: STOP command and AI transparency:
+  - STOP command now deletes all Confessions records for the phone number
+  - Added gemini_prompt and gemini_response fields to Confessions table
+  - Captures and stores both the prompt sent to Gemini and AI-generated response for analysis
+  - AI data only saved during NORMAL message handling in CONFESS state
