@@ -106,11 +106,22 @@ def classify_message(message):
 
 def get_past_wins(phone_number, conversation_id):
     """
-    NOTE: Win tracking is now handled by the AI prompt template.
-    The AI asks for wins as part of the conversation, but wins are not stored separately.
-    This function returns an empty list, and {past_win} placeholder will show "none".
+    Fetch all past wins for a phone number from Airtable.
+    Returns a list of win strings from records where the 'win' field is populated.
     """
-    return []
+    if not confessions_table:
+        return []
+    
+    try:
+        records = confessions_table.all(
+            formula=f"AND({{phone}}='{phone_number}', {{win}}!='')",
+            sort=["timestamp"]
+        )
+        wins = [record['fields'].get('win', '') for record in records if record['fields'].get('win', '').strip()]
+        return wins
+    except Exception as e:
+        print(f"Error fetching past wins: {str(e)}")
+        return []
 
 
 def get_user_state(phone_number):
@@ -284,7 +295,11 @@ def sms_reply():
                 new_step = "coaching_confirm"
             else:  # NORMAL
                 past_wins = get_past_wins(from_number, new_conversation_id)
-                last_win_text = past_wins[-1] if past_wins else "none"
+                # Format all past wins as a list, or "none" if empty
+                if past_wins:
+                    past_wins_text = ", ".join(past_wins)
+                else:
+                    past_wins_text = "none"
 
                 trigger_context = new_conversation_type.lower(
                 ) if new_conversation_type else "workplace"
@@ -295,16 +310,23 @@ def sms_reply():
                 # Replace placeholders with actual values
                 prompt = prompt_template.replace("{user_message}", incoming_msg_original)
                 prompt = prompt.replace("{trigger_context}", trigger_context)
-                prompt = prompt.replace("{past_win}", last_win_text)
+                prompt = prompt.replace("{past_win}", past_wins_text)
                 
                 ai_response = query_gemini(prompt)
                 response_text = ai_response
                 win_to_save = ""
-                new_step = "start"
+                new_step = "awaiting_win"
                 
                 # Capture Gemini prompt and response for Airtable
                 gemini_prompt_to_save = prompt
                 gemini_response_to_save = ai_response
+
+        # AWAITING_WIN STATE - Save user's response as a win
+        elif current_step == "awaiting_win":
+            win_to_save = incoming_msg_original
+            confession_to_save = ""  # Don't overwrite the confession
+            response_text = "Thanks for sharing! Text OUCH anytime you need support."
+            new_step = "start"
 
         # COACHING_CONFIRM STATE - Handle YES response
         elif current_step == "coaching_confirm":
