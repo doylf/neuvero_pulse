@@ -150,6 +150,29 @@ def get_user_state(phone_number):
         return "start", None, None, None, None, True
 
 
+def delete_user_data(phone_number):
+    """Delete all Confessions records for a phone number"""
+    if not confessions_table:
+        print("ERROR: Airtable Confessions table not configured - skipping delete")
+        return False
+    
+    try:
+        records = confessions_table.all(formula=f"{{phone}}='{phone_number}'")
+        if records:
+            for record in records:
+                confessions_table.delete(record['id'])
+            print(f"SUCCESS: Deleted {len(records)} records for {phone_number}")
+            return True
+        else:
+            print(f"No records found for {phone_number}")
+            return True
+    except Exception as e:
+        print(f"ERROR deleting user data: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def save_to_airtable(phone, confession, win, step="start", conversation_id=None, conversation_type=None):
     """Save conversation to Airtable (timestamp is auto-computed by Airtable)"""
     if not confessions_table:
@@ -212,9 +235,16 @@ def sms_reply():
         win_to_save = ""
         new_conversation_id = conversation_id
         new_conversation_type = conversation_type
+        skip_save = False
 
+        # GLOBAL - Check for STOP (works from any state)
+        if incoming_msg == "STOP":
+            response_text = get_response_from_table("STOP")
+            delete_user_data(from_number)
+            skip_save = True  # Don't save a new record after deletion
+        
         # START STATE - Check for OUCH trigger
-        if incoming_msg == "OUCH":
+        elif incoming_msg == "OUCH":
             # Generate new conversation ID
             new_conversation_id = str(uuid.uuid4())
             new_conversation_type = None
@@ -232,9 +262,6 @@ def sms_reply():
         elif current_step == "opt_in":
             if incoming_msg == "HELP":
                 response_text = get_response_from_table("HELP")
-                new_step = "start"
-            elif incoming_msg == "STOP":
-                response_text = get_response_from_table("STOP")
                 new_step = "start"
             elif incoming_msg in ["1", "2", "3"]:
                 trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
@@ -289,13 +316,14 @@ def sms_reply():
             response_text = get_response_from_table("DEFAULT")
             new_step = "start"
 
-        # Save to Airtable
-        save_to_airtable(phone=from_number,
-                         confession=confession_to_save,
-                         win=win_to_save,
-                         step=new_step,
-                         conversation_id=new_conversation_id,
-                         conversation_type=new_conversation_type)
+        # Save to Airtable (unless skip_save is True)
+        if not skip_save:
+            save_to_airtable(phone=from_number,
+                             confession=confession_to_save,
+                             win=win_to_save,
+                             step=new_step,
+                             conversation_id=new_conversation_id,
+                             conversation_type=new_conversation_type)
 
         # Send response via Twilio
         resp = MessagingResponse()
