@@ -298,7 +298,15 @@ def sms_reply():
 
                 trigger_context = new_conversation_type.lower(
                 ) if new_conversation_type else "workplace"
-                prompt = f"User said: {incoming_msg_original}. Context: {trigger_context} issue. Past win: {last_win_text}. Reply in 10 calm words, address workplace frustration with evidence."
+                
+                # Get AI prompt template from Responses table
+                prompt_template = get_response_from_table("AI_PROMPT_TEMPLATE")
+                
+                # Replace placeholders with actual values
+                prompt = prompt_template.replace("{user_message}", incoming_msg_original)
+                prompt = prompt.replace("{trigger_context}", trigger_context)
+                prompt = prompt.replace("{past_win}", last_win_text)
+                
                 ai_response = query_gemini(prompt)
                 response_text = f"{ai_response}\n\nText a win?"
                 win_to_save = ""
