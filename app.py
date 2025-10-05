@@ -50,7 +50,7 @@ if AIRTABLE_API_KEY and AIRTABLE_BASE_ID:
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+    gemini_model = genai.GenerativeModel('gemini-pro')
 else:
     gemini_model = None
 
@@ -58,7 +58,7 @@ print("=== mybrain@work SMS Service Starting ===")
 print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
 print(f"Airtable base: {AIRTABLE_BASE_ID}")
 print(f"Airtable tables: {AIRTABLE_TABLE_NAME}, Responses")
-print(f"AI Model: Google Gemini 1.5 Flash")
+print(f"AI Model: Google Gemini Pro")
 print("All environment variables validated successfully")
 
 
