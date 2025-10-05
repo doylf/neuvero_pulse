@@ -105,23 +105,12 @@ def classify_message(message):
 
 
 def get_past_wins(phone_number, conversation_id):
-    """Fetch past user-reported wins from Airtable where step=win_prompt and matching conversation_id"""
-    if not confessions_table:
-        return []
-
-    try:
-        formula = f"AND({{phone}}='{phone_number}', {{step}}='win_prompt', {{conversation_id}}='{conversation_id}')"
-        records = confessions_table.all(formula=formula)
-        wins = []
-        for record in records:
-            fields = record.get('fields', {})
-            win = fields.get('win', '').strip()
-            if win and len(win) > 0:
-                wins.append(win)
-        return wins
-    except Exception as e:
-        print(f"Error fetching wins from Airtable: {str(e)}")
-        return []
+    """
+    NOTE: Win tracking is now handled by the AI prompt template.
+    The AI asks for wins as part of the conversation, but wins are not stored separately.
+    This function returns an empty list, and {past_win} placeholder will show "none".
+    """
+    return []
 
 
 def get_user_state(phone_number):
@@ -140,8 +129,9 @@ def get_user_state(phone_number):
             conversation_id = fields.get('conversation_id', None)
             conversation_type = fields.get('conversation_type', None)
 
-            if step == "win_prompt" and last_win and len(last_win.strip()) > 0:
-                return "start", last_confession, last_win, conversation_id, conversation_type, False
+            # Legacy: Map old win_prompt state to start for backward compatibility
+            if step == 'win_prompt':
+                step = 'start'
 
             return step, last_confession, last_win, conversation_id, conversation_type, False
         return "start", None, None, None, None, True
