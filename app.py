@@ -216,21 +216,59 @@ def sms_reply():
         gemini_response_to_save = None
         skip_save = False
 
-        # SPECIAL CASE: STOP command (deletes all data)
+        # SPECIAL COMMANDS: Handle special keywords first (before classification)
         if incoming_msg == "STOP":
             response_text = get_response_from_table("STOP")
             delete_user_data(from_number)
-            
-            # Return early to avoid stale state issues
             resp = MessagingResponse()
             resp.message(response_text)
             return str(resp)
+        
+        if incoming_msg == "HELP":
+            response_text = get_response_from_table("HELP")
+            save_to_airtable(from_number, incoming_msg_original, "", current_step, new_conversation_id, conversation_type)
+            resp = MessagingResponse()
+            resp.message(response_text)
+            return str(resp)
+        
+        if incoming_msg == "OUCH":
+            new_conversation_id = str(uuid.uuid4())
+            new_conversation_type = None
+            new_step = "opt_in"
+            
+            if is_first_time:
+                response_text = get_response_from_table("SUBSCRIBE")
+            else:
+                response_text = "Welcome back! Reply:\n1. Co-worker\n2. Boss\n3. Self-doubt\n\nOr HELP/STOP"
+            
+            save_to_airtable(from_number, "OUCH", "", new_step, new_conversation_id, new_conversation_type)
+            resp = MessagingResponse()
+            resp.message(response_text)
+            return str(resp)
+        
+        # SAFETY: Classify ALL other messages for emergency/coaching detection (state-independent)
+        classification = classify_message(incoming_msg_original)
+        print(f"Message classified as: {classification}")
+        
+        # EMERGENCY: Immediate response regardless of state
+        if classification == "EMERGENCY":
+            response_text = get_response_from_table("EMERGENCY")
+            save_to_airtable(from_number, incoming_msg_original, "", "start", new_conversation_id, conversation_type)
+            resp = MessagingResponse()
+            resp.message(response_text)
+            return str(resp)
+        
+        # COACHING: Offer coaching support regardless of state
+        if classification == "COACHING":
+            response_text = get_response_from_table("COACHING_CONFIRM_PROMPT")
+            new_step = "coaching_confirm"
+            save_to_airtable(from_number, incoming_msg_original, "", new_step, new_conversation_id, conversation_type)
+            resp = MessagingResponse()
+            resp.message(response_text)
+            return str(resp)
+        
+        # Normal state machine flow
         else:
-            # Query StateTransitions table for next state
-            classification = None
-            if current_step == "confess":
-                classification = classify_message(incoming_msg_original)
-                print(f"Message classified as: {classification}")
             
             next_state, action_trigger = get_state_transition(current_step, incoming_msg, classification)
             
@@ -242,16 +280,6 @@ def sms_reply():
             
             # Update state
             new_step = next_state if next_state else current_step
-            
-            # SPECIAL CASE: OUCH generates new conversation ID
-            if incoming_msg == "OUCH":
-                new_conversation_id = str(uuid.uuid4())
-                new_conversation_type = None
-                
-                if is_first_time:
-                    response_text = get_response_from_table("SUBSCRIBE")
-                else:
-                    response_text = "Welcome back! Reply:\n1. Co-worker\n2. Boss\n3. Self-doubt\n\nOr HELP/STOP"
             
             # SPECIAL HANDLING: confess state with NORMAL classification needs AI response
             if current_step == "confess" and classification == "NORMAL":
