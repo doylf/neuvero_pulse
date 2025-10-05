@@ -173,7 +173,7 @@ def delete_user_data(phone_number):
         return False
 
 
-def save_to_airtable(phone, confession, win, step="start", conversation_id=None, conversation_type=None):
+def save_to_airtable(phone, confession, win, step="start", conversation_id=None, conversation_type=None, gemini_prompt=None, gemini_response=None):
     """Save conversation to Airtable (timestamp is auto-computed by Airtable)"""
     if not confessions_table:
         print(
@@ -191,9 +191,13 @@ def save_to_airtable(phone, confession, win, step="start", conversation_id=None,
             record["conversation_id"] = conversation_id
         if conversation_type:
             record["conversation_type"] = conversation_type
+        if gemini_prompt:
+            record["gemini_prompt"] = gemini_prompt
+        if gemini_response:
+            record["gemini_response"] = gemini_response
             
         print(
-            f"Attempting to save to Airtable: phone={phone}, step={step}, conversation_id={conversation_id}, conversation_type={conversation_type}, confession={confession[:50] if confession else 'empty'}..., win={win[:50] if win else 'empty'}"
+            f"Attempting to save to Airtable: phone={phone}, step={step}, conversation_id={conversation_id}, conversation_type={conversation_type}, confession={confession[:50] if confession else 'empty'}..., win={win[:50] if win else 'empty'}, gemini_prompt={'YES' if gemini_prompt else 'NO'}, gemini_response={'YES' if gemini_response else 'NO'}"
         )
         result = confessions_table.create(record)
         print(
