@@ -15,14 +15,14 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 
 ### Key Components
 
-1. **Multi-Step Conversation Flow**
+1. **Multi-Step Conversation Flow** (managed via StateTransitions table)
    - **START**: User texts "OUCH" to begin → transitions to opt_in
    - **OPT_IN**: User selects trigger (1=Co-worker, 2=Boss, 3=Self-doubt) or HELP/STOP → transitions to confess
    - **CONFESS**: Gemini classifies message (EMERGENCY/NORMAL/COACHING):
      - EMERGENCY: Provides 988 crisis hotline
      - COACHING: Offers 10-min booking link
-     - NORMAL: Fetches past wins, generates empathetic response, asks for wins → transitions to win_prompt
-   - **WIN_PROMPT**: Stores user's reported win → transitions back to start
+     - NORMAL: Fetches ALL past wins, generates empathetic response (AI asks for wins naturally) → transitions to awaiting_win
+   - **AWAITING_WIN**: Stores user's reported win → transitions back to start
 
 2. **SMS Webhook Endpoint** (`/sms`)
    - Receives incoming SMS messages from Twilio
@@ -40,9 +40,11 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 
 4. **Airtable Storage**
    - **Confessions Table Fields**: id, phone, confession, win, timestamp, step, conversation_id, conversation_type, gemini_prompt, gemini_response
+   - **StateTransitions Table**: Manages state machine logic (CurrentState, InputTrigger, Condition, NextState, ActionTrigger, Weight)
+   - **Responses Table**: Stores all text responses indexed by Trigger field (includes AI_PROMPT_TEMPLATE)
    - Tracks complete interaction history per user
    - **Conversation Tracking**: Each conversation gets unique UUID (conversation_id) generated on "OUCH"
-   - **Conversation Scoping**: Past wins are scoped to current conversation_id
+   - **Win Tracking**: ALL past wins for a phone number are included in {past_win} placeholder (not conversation-scoped)
    - **Conversation Type**: Tracks selected trigger (Co-worker/Boss/Self-doubt) throughout conversation
    - **AI Transparency**: Stores both the prompt sent to Gemini and the AI-generated response for analysis
    - State persistence through step field
@@ -73,17 +75,30 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 4. Set the HTTP method to `POST`
 
 ### Airtable Setup
-Your Airtable "Confessions" table should have these fields:
+
+**Confessions Table** should have these fields:
 - `id` (Auto Number) - Primary key
 - `phone` (Single line text) - User's phone number
 - `confession` (Single line text) - User's message/input
-- `win` (Single line text) - User's reported win or AI response
+- `win` (Single line text) - User's reported win
 - `timestamp` (Date/Time) - When the message was received (auto-computed)
-- `step` (Single Select: opt_in, confess, win_prompt, start, coaching_confirm) - Current conversation state
+- `step` (Single Select: opt_in, confess, awaiting_win, start, coaching_confirm) - Current conversation state
 - `conversation_id` (Single line text) - UUID for tracking conversation sessions
 - `conversation_type` (Single line text) - Selected trigger (Co-worker/Boss/Self-doubt)
 - `gemini_prompt` (Long text) - The prompt sent to Gemini AI for response generation
 - `gemini_response` (Long text) - The response received from Gemini AI (sent to customer)
+
+**StateTransitions Table** for managing state machine:
+- `CurrentState` (Single line text) - The current state
+- `InputTrigger` (Single line text) - The input that triggers transition (* for wildcard)
+- `Condition` (Single line text) - Optional condition (e.g., classification=EMERGENCY)
+- `NextState` (Single line text) - The next state to transition to
+- `ActionTrigger` (Single line text) - The action to perform
+- `Weight` (Number) - Priority for matching (higher = higher priority)
+
+**Responses Table** for storing all text responses:
+- `Trigger` (Single line text) - The trigger key (e.g., SUBSCRIBE, HELP, STOP, AI_PROMPT_TEMPLATE)
+- `Prompt` (Long text) - The response text or prompt template
 
 ## Running the Application
 The application runs on port 8000 using Gunicorn with the command:
@@ -124,3 +139,10 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
   - Added gemini_prompt and gemini_response fields to Confessions table
   - Captures and stores both the prompt sent to Gemini and AI-generated response for analysis
   - AI data only saved during NORMAL message handling in CONFESS state
+- 2025-10-05: StateTransitions table and win tracking refactor:
+  - Added StateTransitions table for generalized state machine logic
+  - Changed win tracking: ALL past wins for phone number included in {past_win} placeholder (not conversation-scoped)
+  - Removed separate "Text a win?" prompt - AI asks naturally via prompt template
+  - New state flow: CONFESS → awaiting_win → START
+  - Win saved when user responds after AI message
+  - AI_PROMPT_TEMPLATE editable in Responses table with {user_message}, {trigger_context}, {past_win} placeholders
