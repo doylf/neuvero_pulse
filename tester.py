@@ -12,11 +12,11 @@ WEBHOOK_URL = "http://localhost:8000/sms"
 TEST_PHONE = "+15555551234"  # Simulated phone number
 TWILIO_NUMBER = "+16169874525"
 
-def send_message(message, phone_number):
+def send_message(message):
     """Send a test message to the webhook"""
     data = {
         'Body': message,
-        'From': phone_number,
+        'From': TEST_PHONE,
         'To': TWILIO_NUMBER
     }
     
@@ -38,13 +38,11 @@ def send_message(message, phone_number):
         return f"Error: {str(e)}"
 
 def main():
-    current_phone = TEST_PHONE
-    
     print("=" * 60)
     print("mybrain@work SMS Webhook Test Tool")
     print("=" * 60)
     print(f"Testing webhook: {WEBHOOK_URL}")
-    print(f"Simulated phone: {current_phone}")
+    print(f"Simulated phone: {TEST_PHONE}")
     print()
     print("Commands:")
     print("  - Type your message and press Enter to send")
@@ -58,6 +56,8 @@ def main():
     print("  4. <your win>")
     print("=" * 60)
     print()
+
+    global TEST_PHONE
     
     while True:
         try:
@@ -70,15 +70,15 @@ def main():
             if user_input.lower() == 'new':
                 # Generate a new phone number
                 import random
-                current_phone = f"+1555555{random.randint(1000, 9999)}"
-                print(f"\n📱 Simulating new phone number: {current_phone}\n")
+                TEST_PHONE = f"+1555555{random.randint(1000, 9999)}"
+                print(f"\n📱 Simulating new phone number: {TEST_PHONE}\n")
                 continue
             
             if not user_input:
                 continue
             
             # Send the message and get response
-            response = send_message(user_input, current_phone)
+            response = send_message(user_input)
             print(f"\n🤖 Bot: {response}\n")
             
         except KeyboardInterrupt:
