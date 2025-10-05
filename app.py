@@ -240,6 +240,8 @@ def sms_reply():
         new_conversation_id = conversation_id
         new_conversation_type = conversation_type
         skip_save = False
+        gemini_prompt_to_save = None
+        gemini_response_to_save = None
 
         # GLOBAL - Check for STOP (works from any state)
         if incoming_msg == "STOP":
@@ -299,6 +301,10 @@ def sms_reply():
                 response_text = f"{ai_response}\n\nText a win?"
                 win_to_save = ""
                 new_step = "win_prompt"
+                
+                # Capture Gemini prompt and response for Airtable
+                gemini_prompt_to_save = prompt
+                gemini_response_to_save = ai_response
 
         # COACHING_CONFIRM STATE - Handle YES response
         elif current_step == "coaching_confirm":
@@ -327,7 +333,9 @@ def sms_reply():
                              win=win_to_save,
                              step=new_step,
                              conversation_id=new_conversation_id,
-                             conversation_type=new_conversation_type)
+                             conversation_type=new_conversation_type,
+                             gemini_prompt=gemini_prompt_to_save,
+                             gemini_response=gemini_response_to_save)
 
         # Send response via Twilio
         resp = MessagingResponse()
