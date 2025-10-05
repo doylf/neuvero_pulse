@@ -1,6 +1,7 @@
 import os
 import sys
-from flask import Flask, request, jsonify, session
+import uuid
+from flask import Flask, request, jsonify
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 from pyairtable import Api
@@ -103,13 +104,13 @@ def classify_message(message):
         return "NORMAL"
 
 
-def get_past_wins(phone_number):
-    """Fetch past user-reported wins from Airtable where step=win_prompt"""
+def get_past_wins(phone_number, conversation_id):
+    """Fetch past user-reported wins from Airtable where step=win_prompt and matching conversation_id"""
     if not confessions_table:
         return []
 
     try:
-        formula = f"AND({{phone}}='{phone_number}', {{step}}='win_prompt')"
+        formula = f"AND({{phone}}='{phone_number}', {{step}}='win_prompt', {{conversation_id}}='{conversation_id}')"
         records = confessions_table.all(formula=formula)
         wins = []
         for record in records:
@@ -124,9 +125,9 @@ def get_past_wins(phone_number):
 
 
 def get_user_state(phone_number):
-    """Get the last state for a user from Airtable. Returns (step, last_confession, last_win, is_first_time)"""
+    """Get the last state for a user from Airtable. Returns (step, last_confession, last_win, conversation_id, conversation_type)"""
     if not confessions_table:
-        return "start", None, None, True
+        return "start", None, None, None, None
 
     try:
         records = confessions_table.all(formula=f"{{phone}}='{phone_number}'",
@@ -136,18 +137,20 @@ def get_user_state(phone_number):
             step = fields.get('step', 'start')
             last_confession = fields.get('confession', '')
             last_win = fields.get('win', '')
+            conversation_id = fields.get('conversation_id', None)
+            conversation_type = fields.get('conversation_type', None)
 
             if step == "win_prompt" and last_win and len(last_win.strip()) > 0:
-                return "start", last_confession, last_win, False
+                return "start", last_confession, last_win, conversation_id, conversation_type
 
-            return step, last_confession, last_win, False
-        return "start", None, None, True
+            return step, last_confession, last_win, conversation_id, conversation_type
+        return "start", None, None, None, None
     except Exception as e:
         print(f"Error getting user state: {str(e)}")
-        return "start", None, None, True
+        return "start", None, None, None, None
 
 
-def save_to_airtable(phone, confession, win, step="start"):
+def save_to_airtable(phone, confession, win, step="start", conversation_id=None, conversation_type=None):
     """Save conversation to Airtable (timestamp is auto-computed by Airtable)"""
     if not confessions_table:
         print(
@@ -160,8 +163,14 @@ def save_to_airtable(phone, confession, win, step="start"):
             "win": win,
             "step": step
         }
+        
+        if conversation_id:
+            record["conversation_id"] = conversation_id
+        if conversation_type:
+            record["conversation_type"] = conversation_type
+            
         print(
-            f"Attempting to save to Airtable: phone={phone}, step={step}, confession={confession[:50] if confession else 'empty'}..., win={win[:50] if win else 'empty'}"
+            f"Attempting to save to Airtable: phone={phone}, step={step}, conversation_id={conversation_id}, conversation_type={conversation_type}, confession={confession[:50] if confession else 'empty'}..., win={win[:50] if win else 'empty'}"
         )
         result = confessions_table.create(record)
         print(
@@ -192,25 +201,29 @@ def sms_reply():
 
         print(f"Received SMS from {from_number}: {incoming_msg}")
 
-        current_step, last_confession, last_win, is_first_time = get_user_state(from_number)
+        current_step, last_confession, last_win, conversation_id, conversation_type = get_user_state(from_number)
         print(
-            f"Current state: step={current_step}, last_confession={last_confession}, last_win={last_win}, is_first_time={is_first_time}"
+            f"Current state: step={current_step}, conversation_id={conversation_id}, conversation_type={conversation_type}"
         )
 
         response_text = ""
         new_step = current_step
         confession_to_save = incoming_msg_original
         win_to_save = ""
+        new_conversation_id = conversation_id
+        new_conversation_type = conversation_type
 
         # START STATE - Check for OUCH trigger
         if incoming_msg == "OUCH":
-            if is_first_time:
-                # First-time user: show opt-in message
+            if not conversation_id or current_step == "start":
+                # Generate new conversation ID
+                new_conversation_id = str(uuid.uuid4())
+                new_conversation_type = None
                 response_text = get_response_from_table("SUBSCRIBE")
                 new_step = "opt_in"
             else:
-                # Returning user: skip directly to trigger selection
-                response_text = "Welcome back! Reply:\n1. Co-worker\n2. Boss\n3. Self-doubt\n\nOr HELP/STOP"
+                # Returning user with active conversation
+                response_text = get_response_from_table("SUBSCRIBE")
                 new_step = "opt_in"
 
         # OPT-IN STATE
@@ -224,6 +237,7 @@ def sms_reply():
             elif incoming_msg in ["1", "2", "3"]:
                 trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
                 trigger = trigger_map[incoming_msg]
+                new_conversation_type = trigger
                 response_text = get_response_from_table(trigger)
                 new_step = "confess"
                 confession_to_save = trigger
@@ -242,11 +256,11 @@ def sms_reply():
                     "COACHING_CONFIRM_PROMPT")
                 new_step = "coaching_confirm"
             else:  # NORMAL
-                past_wins = get_past_wins(from_number)
+                past_wins = get_past_wins(from_number, new_conversation_id)
                 last_win_text = past_wins[-1] if past_wins else "none"
 
-                trigger_context = last_confession.lower(
-                ) if last_confession else "workplace"
+                trigger_context = new_conversation_type.lower(
+                ) if new_conversation_type else "workplace"
                 prompt = f"User said: {incoming_msg_original}. Context: {trigger_context} issue. Past win: {last_win_text}. Reply in 10 calm words, address workplace frustration with evidence."
                 ai_response = query_gemini(prompt)
                 response_text = f"{ai_response}\n\nText a win?"
@@ -266,7 +280,7 @@ def sms_reply():
             response_text = get_response_from_table("WIN_PROMPT")
             confession_to_save = ""
             win_to_save = incoming_msg_original
-            new_step = "win_prompt"
+            new_step = "start"
 
         # DEFAULT - If no state matches, prompt to start
         else:
@@ -277,7 +291,9 @@ def sms_reply():
         save_to_airtable(phone=from_number,
                          confession=confession_to_save,
                          win=win_to_save,
-                         step=new_step)
+                         step=new_step,
+                         conversation_id=new_conversation_id,
+                         conversation_type=new_conversation_type)
 
         # Send response via Twilio
         resp = MessagingResponse()
@@ -301,31 +317,6 @@ def health_check():
         "status": "healthy",
         "service": "mybrain@work SMS service"
     }), 200
-
-
-@app.route('/debug/schema', methods=['GET'])
-def debug_schema():
-    """Debug endpoint to show Airtable field names"""
-    if not confessions_table:
-        return jsonify({"error": "Airtable not configured"}), 500
-
-    try:
-        records = confessions_table.all(max_records=1)
-        if records:
-            fields = records[0].get('fields', {})
-            return jsonify({
-                "table": "Confessions",
-                "field_names": list(fields.keys()),
-                "sample_record": fields
-            })
-        return jsonify({
-            "table":
-            "Confessions",
-            "message":
-            "No records found. Please add at least one record to see field names."
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/', methods=['GET'])
