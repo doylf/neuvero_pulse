@@ -91,18 +91,31 @@ def get_state_transition(current_state, input_trigger, classification=None):
     if not state_transitions_table:
         return None, None
     try:
-        formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='{input_trigger}')"
+        # Priority 1: Exact match with classification condition (if classification provided)
         if classification:
             formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='{input_trigger}', {{Condition}}='classification={classification}')"
+            records = state_transitions_table.all(formula=formula, sort=["-Weight"])
+            if records:
+                fields = records[0].get('fields', {})
+                return fields.get('NextState', current_state), fields.get('ActionTrigger', 'DEFAULT')
+        
+        # Priority 2: Exact match without classification condition (standard transitions)
+        formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='{input_trigger}')"
         records = state_transitions_table.all(formula=formula, sort=["-Weight"])
         if records:
             fields = records[0].get('fields', {})
             return fields.get('NextState', current_state), fields.get('ActionTrigger', 'DEFAULT')
         
-        # Fallback to wildcard
-        formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='*')"
+        # Priority 3: Wildcard with classification (if classification provided)
         if classification:
             formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='*', {{Condition}}='classification={classification}')"
+            records = state_transitions_table.all(formula=formula, sort=["-Weight"])
+            if records:
+                fields = records[0].get('fields', {})
+                return fields.get('NextState', current_state), fields.get('ActionTrigger', 'DEFAULT')
+        
+        # Priority 4: Wildcard without classification (final fallback)
+        formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='*')"
         records = state_transitions_table.all(formula=formula, sort=["-Weight"])
         if records:
             fields = records[0].get('fields', {})
