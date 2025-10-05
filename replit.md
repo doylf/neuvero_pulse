@@ -39,9 +39,11 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
    - Handles API errors gracefully
 
 4. **Airtable Storage**
-   - Fields: id, phone, confession, win, timestamp, step
+   - **Confessions Table Fields**: id, phone, confession, win, timestamp, step, conversation_id, conversation_type
    - Tracks complete interaction history per user
-   - Enables past win retrieval for personalized responses
+   - **Conversation Tracking**: Each conversation gets unique UUID (conversation_id) generated on "OUCH"
+   - **Conversation Scoping**: Past wins are scoped to current conversation_id
+   - **Conversation Type**: Tracks selected trigger (Co-worker/Boss/Self-doubt) throughout conversation
    - State persistence through step field
 
 ### API Endpoints
@@ -75,8 +77,10 @@ Your Airtable "Confessions" table should have these fields:
 - `phone` (Single line text) - User's phone number
 - `confession` (Single line text) - User's message/input
 - `win` (Single line text) - User's reported win or AI response
-- `timestamp` (Date/Time) - When the message was received
-- `step` (Single Select: opt_in, confess, win_prompt, start) - Current conversation state
+- `timestamp` (Date/Time) - When the message was received (auto-computed)
+- `step` (Single Select: opt_in, confess, win_prompt, start, coaching_confirm) - Current conversation state
+- `conversation_id` (Single line text) - UUID for tracking conversation sessions
+- `conversation_type` (Single line text) - Selected trigger (Co-worker/Boss/Self-doubt)
 
 ## Running the Application
 The application runs on port 8000 using Gunicorn with the command:
@@ -104,3 +108,11 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
   - Added `is_first_time` flag to track new vs returning users
   - Returning users get "Welcome back" message and skip to trigger selection
   - Enhanced AI prompt to include trigger context (co-worker/boss/self-doubt) for personalized responses
+- 2025-10-05: Conversation tracking implementation:
+  - Added conversation_id (UUID) to track individual conversation sessions
+  - Added conversation_type to persist user's selected trigger throughout conversation
+  - UUID generated on "OUCH" and maintained throughout conversation lifecycle
+  - Past wins now scoped to current conversation_id (not all user history)
+  - Fixed win tracking: wins saved with step="win_prompt" for proper retrieval
+  - Removed session/cookie dependencies (fully stateless webhook design)
+  - Updated Airtable schema: added conversation_id and conversation_type fields
