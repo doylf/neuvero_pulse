@@ -146,3 +146,12 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
   - New state flow: CONFESS → awaiting_win → START
   - Win saved when user responds after AI message
   - AI_PROMPT_TEMPLATE editable in Responses table with {user_message}, {trigger_context}, {past_win} placeholders
+- 2025-10-05: StateTransitions integration complete:
+  - Refactored SMS handler to use get_state_transition() for all routing (replaces hardcoded if/elif logic)
+  - Conversation flow now fully data-driven through Airtable StateTransitions table
+  - Action-based response routing using ActionTrigger field
+  - STOP command returns early to prevent stale state issues
+  - Added defensive default for empty response_text to prevent silent failures
+  - ActionTrigger whitespace normalized via strip() to handle Airtable data formatting
+  - Win capture flow verified: user response after AI → saved as win, state resets to start
+  - All state transitions and responses now editable in Airtable without code changes
