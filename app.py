@@ -308,9 +308,9 @@ def sms_reply():
                 prompt = prompt.replace("{past_win}", last_win_text)
                 
                 ai_response = query_gemini(prompt)
-                response_text = f"{ai_response}\n\nText a win?"
+                response_text = ai_response
                 win_to_save = ""
-                new_step = "win_prompt"
+                new_step = "start"
                 
                 # Capture Gemini prompt and response for Airtable
                 gemini_prompt_to_save = prompt
@@ -323,13 +323,6 @@ def sms_reply():
             else:
                 response_text = get_response_from_table("COACHING_CONFIRM_NO")
             new_step = "start"
-
-        # WIN_PROMPT STATE
-        elif current_step == "win_prompt":
-            response_text = get_response_from_table("WIN_PROMPT")
-            confession_to_save = ""
-            win_to_save = incoming_msg_original
-            new_step = "win_prompt"
 
         # DEFAULT - If no state matches, prompt to start
         else:
