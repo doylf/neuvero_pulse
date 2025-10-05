@@ -97,8 +97,13 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 - `Weight` (Number) - Priority for matching (higher = higher priority)
 
 **Responses Table** for storing all text responses:
-- `Trigger` (Single line text) - The trigger key (e.g., SUBSCRIBE, HELP, STOP, AI_PROMPT_TEMPLATE)
+- `Trigger` (Single line text) - The trigger key (e.g., SUBSCRIBE, HELP, STOP, AI_PROMPT_TEMPLATE, AI_PROMPT_TEMPLATE_NO_WINS)
 - `Prompt` (Long text) - The response text or prompt template
+
+**AI Prompt Templates** (configurable in Responses table):
+- `AI_PROMPT_TEMPLATE` - Used when user has past wins. Supports placeholders: {user_message}, {trigger_context}, {past_win}
+- `AI_PROMPT_TEMPLATE_NO_WINS` - Used for first-time users with no past wins. Same placeholders available
+- The system automatically selects the appropriate template based on win history
 
 ## Running the Application
 The application runs on port 8000 using Gunicorn with the command:
@@ -155,3 +160,10 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
   - ActionTrigger whitespace normalized via strip() to handle Airtable data formatting
   - Win capture flow verified: user response after AI → saved as win, state resets to start
   - All state transitions and responses now editable in Airtable without code changes
+- 2025-10-05: Dual AI prompt templates:
+  - Added AI_PROMPT_TEMPLATE_NO_WINS for users without past wins
+  - System automatically selects appropriate template based on win history
+  - AI_PROMPT_TEMPLATE used when past wins exist (references wins in response)
+  - AI_PROMPT_TEMPLATE_NO_WINS used for first-time users (acknowledges new beginning)
+  - Both templates fully configurable in Airtable Responses table
+  - No code changes needed to update prompt content or messaging
