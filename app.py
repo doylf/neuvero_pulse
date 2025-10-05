@@ -229,6 +229,11 @@ def sms_reply():
                 print(f"Message classified as: {classification}")
             
             next_state, action_trigger = get_state_transition(current_step, incoming_msg, classification)
+            
+            # Strip whitespace from action_trigger to handle Airtable data issues
+            if action_trigger:
+                action_trigger = action_trigger.strip()
+            
             print(f"Transition: {current_step} + '{incoming_msg}' -> {next_state} (Action: {action_trigger})")
             
             # Update state
@@ -243,6 +248,31 @@ def sms_reply():
                     response_text = get_response_from_table("SUBSCRIBE")
                 else:
                     response_text = "Welcome back! Reply:\n1. Co-worker\n2. Boss\n3. Self-doubt\n\nOr HELP/STOP"
+            
+            # SPECIAL HANDLING: confess state with NORMAL classification needs AI response
+            if current_step == "confess" and classification == "NORMAL":
+                past_wins = get_past_wins(from_number, new_conversation_id)
+                if past_wins:
+                    past_wins_text = ", ".join(past_wins)
+                else:
+                    past_wins_text = "none"
+
+                trigger_context = new_conversation_type.lower() if new_conversation_type else "workplace"
+                
+                # Get AI prompt template from Responses table
+                prompt_template = get_response_from_table("AI_PROMPT_TEMPLATE")
+                
+                # Replace placeholders with actual values
+                prompt = prompt_template.replace("{user_message}", incoming_msg_original)
+                prompt = prompt.replace("{trigger_context}", trigger_context)
+                prompt = prompt.replace("{past_win}", past_wins_text)
+                
+                ai_response = query_gemini(prompt)
+                response_text = ai_response
+                
+                # Capture Gemini prompt and response for Airtable
+                gemini_prompt_to_save = prompt
+                gemini_response_to_save = ai_response
             
             # Handle actions based on ActionTrigger from StateTransitions
             elif action_trigger == "HELP":
@@ -269,36 +299,11 @@ def sms_reply():
             elif action_trigger == "COACHING_CONFIRM_NO":
                 response_text = get_response_from_table("COACHING_CONFIRM_NO")
             
-            elif action_trigger == "WIN_PROMPT":
+            elif action_trigger in ["WIN_PROMPT", "AWAITING_WIN"]:
                 # User is in awaiting_win state - save their response as a win
                 win_to_save = incoming_msg_original
                 confession_to_save = ""
                 response_text = get_response_from_table("WIN_PROMPT")
-            
-            # SPECIAL HANDLING: confess state with NORMAL classification needs AI response
-            elif current_step == "confess" and classification == "NORMAL":
-                past_wins = get_past_wins(from_number, new_conversation_id)
-                if past_wins:
-                    past_wins_text = ", ".join(past_wins)
-                else:
-                    past_wins_text = "none"
-
-                trigger_context = new_conversation_type.lower() if new_conversation_type else "workplace"
-                
-                # Get AI prompt template from Responses table
-                prompt_template = get_response_from_table("AI_PROMPT_TEMPLATE")
-                
-                # Replace placeholders with actual values
-                prompt = prompt_template.replace("{user_message}", incoming_msg_original)
-                prompt = prompt.replace("{trigger_context}", trigger_context)
-                prompt = prompt.replace("{past_win}", past_wins_text)
-                
-                ai_response = query_gemini(prompt)
-                response_text = ai_response
-                
-                # Capture Gemini prompt and response for Airtable
-                gemini_prompt_to_save = prompt
-                gemini_response_to_save = ai_response
 
         # Save to Airtable unless skipped
         if not skip_save:
