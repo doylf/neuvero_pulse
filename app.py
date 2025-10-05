@@ -5,14 +5,13 @@ from flask import Flask, request, jsonify
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 from pyairtable import Api
-from datetime import timedelta
+from datetime import datetime
 import google.generativeai as genai
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get(
-    'SESSION_SECRET', 'dev-secret-key-change-in-production')
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+app.config['SECRET_KEY'] = os.environ.get('SESSION_SECRET', 'dev-secret-key-change-in-production')
 
+# Environment Variables
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
 TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
@@ -29,24 +28,15 @@ required_env_vars = {
     'AIRTABLE_API_KEY': AIRTABLE_API_KEY,
     'AIRTABLE_BASE_ID': AIRTABLE_BASE_ID
 }
-
 missing_vars = [k for k, v in required_env_vars.items() if not v]
 if missing_vars:
     error_msg = f"WARNING: Missing environment variables: {', '.join(missing_vars)}"
     print(error_msg, file=sys.stderr)
 
-twilio_client = None
-if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
-    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-airtable_api = None
-confessions_table = None
-responses_table = None
-if AIRTABLE_API_KEY and AIRTABLE_BASE_ID:
-    airtable_api = Api(AIRTABLE_API_KEY)
-    confessions_table = airtable_api.table(AIRTABLE_BASE_ID,
-                                           AIRTABLE_TABLE_NAME)
-    responses_table = airtable_api.table(AIRTABLE_BASE_ID, 'Responses')
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN else None
+airtable_api = Api(AIRTABLE_API_KEY) if AIRTABLE_API_KEY and AIRTABLE_BASE_ID else None
+confessions_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME) if airtable_api else None
+responses_table = airtable_api.table(AIRTABLE_BASE_ID, 'Responses') if airtable_api else None
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -61,12 +51,9 @@ print(f"Airtable tables: {AIRTABLE_TABLE_NAME}, Responses")
 print(f"AI Model: Google Gemini 2.0 Flash")
 print("All environment variables validated successfully")
 
-
 def query_gemini(prompt):
-    """Query Google Gemini AI with custom prompt"""
     if not gemini_model:
         return "AI service not configured. Please add GEMINI_API_KEY."
-
     try:
         response = gemini_model.generate_content(prompt)
         return response.text.strip()
@@ -74,12 +61,9 @@ def query_gemini(prompt):
         print(f"Error querying Gemini AI: {str(e)}")
         return "I'm having trouble. Try again later."
 
-
 def get_response_from_table(trigger):
-    """Fetch response text from Responses table by Trigger"""
     if not responses_table:
         return f"Response table not configured (trigger: {trigger})"
-
     try:
         records = responses_table.all(formula=f"{{Trigger}}='{trigger}'")
         if records:
@@ -90,12 +74,10 @@ def get_response_from_table(trigger):
         print(f"Error fetching response from table: {str(e)}")
         return "System error. Please try again."
 
-
 def classify_message(message):
     """Classify message as EMERGENCY, NORMAL, or COACHING"""
     prompt = f"Classify in ONE word: EMERGENCY, NORMAL, or COACHING. EMERGENCY: suicide, self-harm. COACHING: advice, 'what do I do'. NORMAL: venting, doubt. Text: {message}"
     classification = query_gemini(prompt).upper()
-
     if "EMERGENCY" in classification:
         return "EMERGENCY"
     elif "COACHING" in classification:
@@ -103,35 +85,24 @@ def classify_message(message):
     else:
         return "NORMAL"
 
-
 def get_past_wins(phone_number, conversation_id):
-    """
-    Fetch all past wins for a phone number from Airtable.
-    Returns a list of win strings from records where the 'win' field is populated.
-    """
+    """Fetch ALL past wins for a phone number from Airtable (not conversation-scoped)"""
     if not confessions_table:
         return []
-    
     try:
-        records = confessions_table.all(
-            formula=f"AND({{phone}}='{phone_number}', {{win}}!='')",
-            sort=["timestamp"]
-        )
-        wins = [record['fields'].get('win', '') for record in records if record['fields'].get('win', '').strip()]
+        formula = f"AND({{phone}}='{phone_number}', {{win}}!='')"
+        records = confessions_table.all(formula=formula, sort=["timestamp"])
+        wins = [record['fields'].get('win', '').strip() for record in records if record['fields'].get('win', '').strip()]
         return wins
     except Exception as e:
         print(f"Error fetching past wins: {str(e)}")
         return []
 
-
 def get_user_state(phone_number):
-    """Get the last state for a user from Airtable. Returns (step, last_confession, last_win, conversation_id, conversation_type, is_first_time)"""
     if not confessions_table:
         return "start", None, None, None, None, True
-
     try:
-        records = confessions_table.all(formula=f"{{phone}}='{phone_number}'",
-                                        sort=["-timestamp"])
+        records = confessions_table.all(formula=f"{{phone}}='{phone_number}'", sort=["-timestamp"])
         if records:
             fields = records[0].get('fields', {})
             step = fields.get('step', 'start')
@@ -139,24 +110,21 @@ def get_user_state(phone_number):
             last_win = fields.get('win', '')
             conversation_id = fields.get('conversation_id', None)
             conversation_type = fields.get('conversation_type', None)
-
+            
             # Legacy: Map old win_prompt state to start for backward compatibility
             if step == 'win_prompt':
                 step = 'start'
-
+            
             return step, last_confession, last_win, conversation_id, conversation_type, False
         return "start", None, None, None, None, True
     except Exception as e:
         print(f"Error getting user state: {str(e)}")
         return "start", None, None, None, None, True
 
-
 def delete_user_data(phone_number):
-    """Delete all Confessions records for a phone number"""
     if not confessions_table:
         print("ERROR: Airtable Confessions table not configured - skipping delete")
         return False
-    
     try:
         records = confessions_table.all(formula=f"{{phone}}='{phone_number}'")
         if records:
@@ -169,86 +137,62 @@ def delete_user_data(phone_number):
             return True
     except Exception as e:
         print(f"ERROR deleting user data: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return False
 
-
-def save_to_airtable(phone, confession, win, step="start", conversation_id=None, conversation_type=None, gemini_prompt=None, gemini_response=None):
-    """Save conversation to Airtable (timestamp is auto-computed by Airtable)"""
+def save_to_airtable(phone, confession, win, step, conversation_id, conversation_type, gemini_prompt=None, gemini_response=None):
     if not confessions_table:
-        print(
-            "ERROR: Airtable Confessions table not configured - skipping save")
+        print("ERROR: Airtable Confessions table not configured - skipping save")
         return False
     try:
         record = {
             "phone": phone,
             "confession": confession,
             "win": win,
-            "step": step
+            "step": step,
+            "conversation_id": conversation_id,
+            "conversation_type": conversation_type
         }
-        
-        if conversation_id:
-            record["conversation_id"] = conversation_id
-        if conversation_type:
-            record["conversation_type"] = conversation_type
         if gemini_prompt:
             record["gemini_prompt"] = gemini_prompt
         if gemini_response:
             record["gemini_response"] = gemini_response
-            
-        print(
-            f"Attempting to save to Airtable: phone={phone}, step={step}, conversation_id={conversation_id}, conversation_type={conversation_type}, confession={confession[:50] if confession else 'empty'}..., win={win[:50] if win else 'empty'}, gemini_prompt={'YES' if gemini_prompt else 'NO'}, gemini_response={'YES' if gemini_response else 'NO'}"
-        )
+        print(f"Attempting to save to Airtable: {record}")
         result = confessions_table.create(record)
-        print(
-            f"SUCCESS: Saved to Airtable with record ID: {result.get('id', 'unknown')}"
-        )
+        print(f"SUCCESS: Saved to Airtable with record ID: {result.get('id', 'unknown')}")
         return True
     except Exception as e:
         print(f"ERROR saving to Airtable: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return False
-
 
 @app.route('/sms', methods=['POST'])
 def sms_reply():
-    """Handle incoming SMS messages from Twilio"""
     if missing_vars:
-        return jsonify({
-            "error": "Service not configured",
-            "missing": missing_vars
-        }), 500
-
+        return jsonify({"error": "Service not configured", "missing": missing_vars}), 500
     try:
         incoming_msg = request.form.get('Body', '').strip().upper()
         incoming_msg_original = request.form.get('Body', '').strip()
         from_number = request.form.get('From', '')
         to_number = request.form.get('To', '')
-
         print(f"Received SMS from {from_number}: {incoming_msg}")
 
         current_step, last_confession, last_win, conversation_id, conversation_type, is_first_time = get_user_state(from_number)
-        print(
-            f"Current state: step={current_step}, conversation_id={conversation_id}, conversation_type={conversation_type}, is_first_time={is_first_time}"
-        )
+        print(f"Current state: step={current_step}, conversation_id={conversation_id}, conversation_type={conversation_type}")
 
         response_text = ""
         new_step = current_step
         confession_to_save = incoming_msg_original
         win_to_save = ""
-        new_conversation_id = conversation_id
+        new_conversation_id = conversation_id or str(uuid.uuid4())
         new_conversation_type = conversation_type
-        skip_save = False
         gemini_prompt_to_save = None
         gemini_response_to_save = None
+        skip_save = False
 
         # GLOBAL - Check for STOP (works from any state)
         if incoming_msg == "STOP":
             response_text = get_response_from_table("STOP")
             delete_user_data(from_number)
-            skip_save = True  # Don't save a new record after deletion
+            skip_save = True
         
         # GLOBAL - Check for HELP (works from any state)
         elif incoming_msg == "HELP":
@@ -290,19 +234,17 @@ def sms_reply():
                 response_text = get_response_from_table("EMERGENCY")
                 new_step = "start"
             elif classification == "COACHING":
-                response_text = get_response_from_table(
-                    "COACHING_CONFIRM_PROMPT")
+                response_text = get_response_from_table("COACHING_CONFIRM_PROMPT")
                 new_step = "coaching_confirm"
             else:  # NORMAL
                 past_wins = get_past_wins(from_number, new_conversation_id)
-                # Format all past wins as a list, or "none" if empty
+                # Format all past wins as a comma-separated list
                 if past_wins:
                     past_wins_text = ", ".join(past_wins)
                 else:
                     past_wins_text = "none"
 
-                trigger_context = new_conversation_type.lower(
-                ) if new_conversation_type else "workplace"
+                trigger_context = new_conversation_type.lower() if new_conversation_type else "workplace"
                 
                 # Get AI prompt template from Responses table
                 prompt_template = get_response_from_table("AI_PROMPT_TEMPLATE")
@@ -320,7 +262,7 @@ def sms_reply():
                 # Capture Gemini prompt and response for Airtable
                 gemini_prompt_to_save = prompt
                 gemini_response_to_save = ai_response
-
+        
         # AWAITING_WIN STATE - Save user's response as a win
         elif current_step == "awaiting_win":
             win_to_save = incoming_msg_original
@@ -341,21 +283,13 @@ def sms_reply():
             response_text = get_response_from_table("DEFAULT")
             new_step = "start"
 
-        # Save to Airtable (unless skip_save is True)
+        # Save to Airtable unless skipped
         if not skip_save:
-            save_to_airtable(phone=from_number,
-                             confession=confession_to_save,
-                             win=win_to_save,
-                             step=new_step,
-                             conversation_id=new_conversation_id,
-                             conversation_type=new_conversation_type,
-                             gemini_prompt=gemini_prompt_to_save,
-                             gemini_response=gemini_response_to_save)
+            save_to_airtable(from_number, confession_to_save, win_to_save, new_step, new_conversation_id, new_conversation_type, gemini_prompt_to_save, gemini_response_to_save)
 
-        # Send response via Twilio
+        # Send response
         resp = MessagingResponse()
         resp.message(response_text)
-
         return str(resp), 200, {'Content-Type': 'text/xml'}
 
     except Exception as e:
@@ -366,24 +300,13 @@ def sms_reply():
         resp.message("Sorry, I encountered an error processing your message.")
         return str(resp), 200, {'Content-Type': 'text/xml'}
 
-
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        "status": "healthy",
-        "service": "mybrain@work SMS service"
-    }), 200
-
+    return jsonify({"status": "healthy", "service": "mybrain@work SMS service"}), 200
 
 @app.route('/', methods=['GET'])
 def home():
-    """Home endpoint"""
-    return jsonify({
-        "message": "mybrain@work SMS service is running",
-        "webhook_endpoint": "/sms"
-    }), 200
-
+    return jsonify({"message": "mybrain@work SMS service is running", "webhook_endpoint": "/sms"}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=False)
