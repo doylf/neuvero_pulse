@@ -220,7 +220,11 @@ def sms_reply():
         if incoming_msg == "STOP":
             response_text = get_response_from_table("STOP")
             delete_user_data(from_number)
-            skip_save = True
+            
+            # Return early to avoid stale state issues
+            resp = MessagingResponse()
+            resp.message(response_text)
+            return str(resp)
         else:
             # Query StateTransitions table for next state
             classification = None
@@ -308,6 +312,11 @@ def sms_reply():
         # Save to Airtable unless skipped
         if not skip_save:
             save_to_airtable(from_number, confession_to_save, win_to_save, new_step, new_conversation_id, new_conversation_type, gemini_prompt_to_save, gemini_response_to_save)
+
+        # Defensive: ensure response_text is not empty
+        if not response_text or not response_text.strip():
+            response_text = "Sorry, I didn't understand that. Text HELP for support or OUCH to start over."
+            print(f"WARNING: Empty response_text, using default")
 
         # Send response
         resp = MessagingResponse()
