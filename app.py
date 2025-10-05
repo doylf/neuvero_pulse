@@ -125,9 +125,9 @@ def get_past_wins(phone_number, conversation_id):
 
 
 def get_user_state(phone_number):
-    """Get the last state for a user from Airtable. Returns (step, last_confession, last_win, conversation_id, conversation_type)"""
+    """Get the last state for a user from Airtable. Returns (step, last_confession, last_win, conversation_id, conversation_type, is_first_time)"""
     if not confessions_table:
-        return "start", None, None, None, None
+        return "start", None, None, None, None, True
 
     try:
         records = confessions_table.all(formula=f"{{phone}}='{phone_number}'",
@@ -141,13 +141,13 @@ def get_user_state(phone_number):
             conversation_type = fields.get('conversation_type', None)
 
             if step == "win_prompt" and last_win and len(last_win.strip()) > 0:
-                return "start", last_confession, last_win, conversation_id, conversation_type
+                return "start", last_confession, last_win, conversation_id, conversation_type, False
 
-            return step, last_confession, last_win, conversation_id, conversation_type
-        return "start", None, None, None, None
+            return step, last_confession, last_win, conversation_id, conversation_type, False
+        return "start", None, None, None, None, True
     except Exception as e:
         print(f"Error getting user state: {str(e)}")
-        return "start", None, None, None, None
+        return "start", None, None, None, None, True
 
 
 def save_to_airtable(phone, confession, win, step="start", conversation_id=None, conversation_type=None):
@@ -201,9 +201,9 @@ def sms_reply():
 
         print(f"Received SMS from {from_number}: {incoming_msg}")
 
-        current_step, last_confession, last_win, conversation_id, conversation_type = get_user_state(from_number)
+        current_step, last_confession, last_win, conversation_id, conversation_type, is_first_time = get_user_state(from_number)
         print(
-            f"Current state: step={current_step}, conversation_id={conversation_id}, conversation_type={conversation_type}"
+            f"Current state: step={current_step}, conversation_id={conversation_id}, conversation_type={conversation_type}, is_first_time={is_first_time}"
         )
 
         response_text = ""
@@ -215,16 +215,18 @@ def sms_reply():
 
         # START STATE - Check for OUCH trigger
         if incoming_msg == "OUCH":
-            if not conversation_id or current_step == "start":
-                # Generate new conversation ID
-                new_conversation_id = str(uuid.uuid4())
-                new_conversation_type = None
+            # Generate new conversation ID
+            new_conversation_id = str(uuid.uuid4())
+            new_conversation_type = None
+            
+            if is_first_time:
+                # First-time user: show opt-in message
                 response_text = get_response_from_table("SUBSCRIBE")
-                new_step = "opt_in"
             else:
-                # Returning user with active conversation
-                response_text = get_response_from_table("SUBSCRIBE")
-                new_step = "opt_in"
+                # Returning user: skip opt-in, go straight to trigger selection
+                response_text = "Welcome back! Reply:\n1. Co-worker\n2. Boss\n3. Self-doubt\n\nOr HELP/STOP"
+            
+            new_step = "opt_in"
 
         # OPT-IN STATE
         elif current_step == "opt_in":
@@ -235,7 +237,7 @@ def sms_reply():
                 response_text = get_response_from_table("STOP")
                 new_step = "start"
             elif incoming_msg in ["1", "2", "3"]:
-                trigger_map = {"1": "Co-worker", "2": "Boss", "3": "1"}
+                trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
                 trigger = trigger_map[incoming_msg]
                 new_conversation_type = trigger
                 response_text = get_response_from_table(trigger)
