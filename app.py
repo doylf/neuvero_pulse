@@ -36,6 +36,7 @@ if missing_vars:
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN else None
 airtable_api = Api(AIRTABLE_API_KEY) if AIRTABLE_API_KEY and AIRTABLE_BASE_ID else None
 confessions_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME) if airtable_api else None
+state_transitions_table = airtable_api.table(AIRTABLE_BASE_ID, 'StateTransitions') if airtable_api else None
 responses_table = airtable_api.table(AIRTABLE_BASE_ID, 'Responses') if airtable_api else None
 
 if GEMINI_API_KEY:
@@ -47,7 +48,7 @@ else:
 print("=== mybrain@work SMS Service Starting ===")
 print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
 print(f"Airtable base: {AIRTABLE_BASE_ID}")
-print(f"Airtable tables: {AIRTABLE_TABLE_NAME}, Responses")
+print(f"Airtable tables: {AIRTABLE_TABLE_NAME}, StateTransitions, Responses")
 print(f"AI Model: Google Gemini 2.0 Flash")
 print("All environment variables validated successfully")
 
@@ -84,6 +85,33 @@ def classify_message(message):
         return "COACHING"
     else:
         return "NORMAL"
+
+def get_state_transition(current_state, input_trigger, classification=None):
+    """Query StateTransitions table to determine next state"""
+    if not state_transitions_table:
+        return None, None
+    try:
+        formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='{input_trigger}')"
+        if classification:
+            formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='{input_trigger}', {{Condition}}='classification={classification}')"
+        records = state_transitions_table.all(formula=formula, sort=["-Weight"])
+        if records:
+            fields = records[0].get('fields', {})
+            return fields.get('NextState', current_state), fields.get('ActionTrigger', 'DEFAULT')
+        
+        # Fallback to wildcard
+        formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='*')"
+        if classification:
+            formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='*', {{Condition}}='classification={classification}')"
+        records = state_transitions_table.all(formula=formula, sort=["-Weight"])
+        if records:
+            fields = records[0].get('fields', {})
+            return fields.get('NextState', current_state), fields.get('ActionTrigger', 'DEFAULT')
+        
+        return current_state, 'DEFAULT'
+    except Exception as e:
+        print(f"Error fetching state transition: {str(e)}")
+        return current_state, 'DEFAULT'
 
 def get_past_wins(phone_number, conversation_id):
     """Fetch ALL past wins for a phone number from Airtable (not conversation-scoped)"""
