@@ -256,15 +256,16 @@ def sms_reply():
             # SPECIAL HANDLING: confess state with NORMAL classification needs AI response
             if current_step == "confess" and classification == "NORMAL":
                 past_wins = get_past_wins(from_number, new_conversation_id)
-                if past_wins:
-                    past_wins_text = ", ".join(past_wins)
-                else:
-                    past_wins_text = "none"
-
+                
                 trigger_context = new_conversation_type.lower() if new_conversation_type else "workplace"
                 
-                # Get AI prompt template from Responses table
-                prompt_template = get_response_from_table("AI_PROMPT_TEMPLATE")
+                # Select appropriate AI prompt template based on whether past wins exist
+                if past_wins:
+                    past_wins_text = ", ".join(past_wins)
+                    prompt_template = get_response_from_table("AI_PROMPT_TEMPLATE")
+                else:
+                    past_wins_text = "none"
+                    prompt_template = get_response_from_table("AI_PROMPT_TEMPLATE_NO_WINS")
                 
                 # Replace placeholders with actual values
                 prompt = prompt_template.replace("{user_message}", incoming_msg_original)
