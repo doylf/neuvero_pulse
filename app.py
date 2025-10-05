@@ -249,6 +249,11 @@ def sms_reply():
             delete_user_data(from_number)
             skip_save = True  # Don't save a new record after deletion
         
+        # GLOBAL - Check for HELP (works from any state)
+        elif incoming_msg == "HELP":
+            response_text = get_response_from_table("HELP")
+            new_step = "start"
+        
         # START STATE - Check for OUCH trigger
         elif incoming_msg == "OUCH":
             # Generate new conversation ID
@@ -266,10 +271,7 @@ def sms_reply():
 
         # OPT-IN STATE
         elif current_step == "opt_in":
-            if incoming_msg == "HELP":
-                response_text = get_response_from_table("HELP")
-                new_step = "start"
-            elif incoming_msg in ["1", "2", "3"]:
+            if incoming_msg in ["1", "2", "3"]:
                 trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
                 trigger = trigger_map[incoming_msg]
                 new_conversation_type = trigger
