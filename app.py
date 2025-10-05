@@ -280,7 +280,7 @@ def sms_reply():
             response_text = get_response_from_table("WIN_PROMPT")
             confession_to_save = ""
             win_to_save = incoming_msg_original
-            new_step = "start"
+            new_step = "win_prompt"
 
         # DEFAULT - If no state matches, prompt to start
         else:
