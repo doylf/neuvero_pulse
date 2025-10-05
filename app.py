@@ -216,57 +216,68 @@ def sms_reply():
         gemini_response_to_save = None
         skip_save = False
 
-        # GLOBAL - Check for STOP (works from any state)
+        # SPECIAL CASE: STOP command (deletes all data)
         if incoming_msg == "STOP":
             response_text = get_response_from_table("STOP")
             delete_user_data(from_number)
             skip_save = True
-        
-        # GLOBAL - Check for HELP (works from any state)
-        elif incoming_msg == "HELP":
-            response_text = get_response_from_table("HELP")
-            new_step = "start"
-        
-        # START STATE - Check for OUCH trigger
-        elif incoming_msg == "OUCH":
-            # Generate new conversation ID
-            new_conversation_id = str(uuid.uuid4())
-            new_conversation_type = None
+        else:
+            # Query StateTransitions table for next state
+            classification = None
+            if current_step == "confess":
+                classification = classify_message(incoming_msg_original)
+                print(f"Message classified as: {classification}")
             
-            if is_first_time:
-                # First-time user: show opt-in message
-                response_text = get_response_from_table("SUBSCRIBE")
-            else:
-                # Returning user: skip opt-in, go straight to trigger selection
-                response_text = "Welcome back! Reply:\n1. Co-worker\n2. Boss\n3. Self-doubt\n\nOr HELP/STOP"
+            next_state, action_trigger = get_state_transition(current_step, incoming_msg, classification)
+            print(f"Transition: {current_step} + '{incoming_msg}' -> {next_state} (Action: {action_trigger})")
             
-            new_step = "opt_in"
-
-        # OPT-IN STATE
-        elif current_step == "opt_in":
-            if incoming_msg in ["1", "2", "3"]:
-                trigger_map = {"1": "Co-worker", "2": "Boss", "3": "Self-doubt"}
-                trigger = trigger_map[incoming_msg]
-                new_conversation_type = trigger
-                response_text = get_response_from_table(trigger)
-                new_step = "confess"
-                confession_to_save = trigger
-            else:
-                response_text = "Please text 1, 2, or 3 for Co-worker, Boss, or self-doubt, or HELP/STOP"
-
-        # CONFESS STATE
-        elif current_step == "confess":
-            classification = classify_message(incoming_msg_original)
-
-            if classification == "EMERGENCY":
+            # Update state
+            new_step = next_state if next_state else current_step
+            
+            # SPECIAL CASE: OUCH generates new conversation ID
+            if incoming_msg == "OUCH":
+                new_conversation_id = str(uuid.uuid4())
+                new_conversation_type = None
+                
+                if is_first_time:
+                    response_text = get_response_from_table("SUBSCRIBE")
+                else:
+                    response_text = "Welcome back! Reply:\n1. Co-worker\n2. Boss\n3. Self-doubt\n\nOr HELP/STOP"
+            
+            # Handle actions based on ActionTrigger from StateTransitions
+            elif action_trigger == "HELP":
+                response_text = get_response_from_table("HELP")
+            
+            elif action_trigger == "DEFAULT":
+                response_text = get_response_from_table("DEFAULT")
+            
+            elif action_trigger in ["Co-worker", "Boss", "Self-doubt"]:
+                # User selected trigger in opt_in state
+                new_conversation_type = action_trigger
+                response_text = get_response_from_table(action_trigger)
+                confession_to_save = action_trigger
+            
+            elif action_trigger == "EMERGENCY":
                 response_text = get_response_from_table("EMERGENCY")
-                new_step = "start"
-            elif classification == "COACHING":
+            
+            elif action_trigger == "COACHING_CONFIRM_PROMPT":
                 response_text = get_response_from_table("COACHING_CONFIRM_PROMPT")
-                new_step = "coaching_confirm"
-            else:  # NORMAL
+            
+            elif action_trigger == "COACHING_CONFIRM_YES":
+                response_text = get_response_from_table("COACHING_CONFIRM_YES")
+            
+            elif action_trigger == "COACHING_CONFIRM_NO":
+                response_text = get_response_from_table("COACHING_CONFIRM_NO")
+            
+            elif action_trigger == "WIN_PROMPT":
+                # User is in awaiting_win state - save their response as a win
+                win_to_save = incoming_msg_original
+                confession_to_save = ""
+                response_text = get_response_from_table("WIN_PROMPT")
+            
+            # SPECIAL HANDLING: confess state with NORMAL classification needs AI response
+            elif current_step == "confess" and classification == "NORMAL":
                 past_wins = get_past_wins(from_number, new_conversation_id)
-                # Format all past wins as a comma-separated list
                 if past_wins:
                     past_wins_text = ", ".join(past_wins)
                 else:
@@ -284,32 +295,10 @@ def sms_reply():
                 
                 ai_response = query_gemini(prompt)
                 response_text = ai_response
-                win_to_save = ""
-                new_step = "awaiting_win"
                 
                 # Capture Gemini prompt and response for Airtable
                 gemini_prompt_to_save = prompt
                 gemini_response_to_save = ai_response
-        
-        # AWAITING_WIN STATE - Save user's response as a win
-        elif current_step == "awaiting_win":
-            win_to_save = incoming_msg_original
-            confession_to_save = ""  # Don't overwrite the confession
-            response_text = "Thanks for sharing! Text OUCH anytime you need support."
-            new_step = "start"
-
-        # COACHING_CONFIRM STATE - Handle YES response
-        elif current_step == "coaching_confirm":
-            if incoming_msg == "YES":
-                response_text = get_response_from_table("COACHING_CONFIRM_YES")
-            else:
-                response_text = get_response_from_table("COACHING_CONFIRM_NO")
-            new_step = "start"
-
-        # DEFAULT - If no state matches, prompt to start
-        else:
-            response_text = get_response_from_table("DEFAULT")
-            new_step = "start"
 
         # Save to Airtable unless skipped
         if not skip_save:
