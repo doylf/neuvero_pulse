@@ -1,84 +1,91 @@
+#!/usr/bin/env python3
+"""
+Test tool for mybrain@work SMS webhook
+Simulates Twilio SMS messages without needing to publish or use actual SMS
+"""
+
 import requests
-import time
-import json
+import sys
+from xml.etree import ElementTree as ET
 
-# Webhook URL (replace with your Replit URL)
-WEBHOOK_URL = "https://09ac2762-fc6d-49c5-bac4-150d51044e31-00-26pubw4g0qez.janeway.replit.dev/sms"
-TWILIO_NUMBER = "+16169874525"  # Your Twilio campaign number
-TEST_NUMBER = "+15551234567"  # Any test number
+WEBHOOK_URL = "http://localhost:8000/sms"
+TEST_PHONE = "+15555551234"  # Simulated phone number
+TWILIO_NUMBER = "+16169874525"
 
+def send_message(message):
+    """Send a test message to the webhook"""
+    data = {
+        'Body': message,
+        'From': TEST_PHONE,
+        'To': TWILIO_NUMBER
+    }
+    
+    try:
+        response = requests.post(WEBHOOK_URL, data=data)
+        
+        if response.status_code == 200:
+            # Parse the TwiML response
+            root = ET.fromstring(response.text)
+            message_elem = root.find('.//Message')
+            if message_elem is not None:
+                return message_elem.text
+            return "No message found in response"
+        else:
+            return f"Error: HTTP {response.status_code}"
+    except requests.exceptions.ConnectionError:
+        return "Error: Cannot connect to webhook. Make sure the Flask server is running on port 8000."
+    except Exception as e:
+        return f"Error: {str(e)}"
 
-def send_webhook_request(payload):
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    response = requests.post(WEBHOOK_URL, data=payload, headers=headers)
-    print(f"Request: {payload['Body']} - Status: {response.status_code}")
-    print(f"Response: {response.text}")
-    time.sleep(1)  # Buffer for processing
-    return response.text
+def main():
+    print("=" * 60)
+    print("mybrain@work SMS Webhook Test Tool")
+    print("=" * 60)
+    print(f"Testing webhook: {WEBHOOK_URL}")
+    print(f"Simulated phone: {TEST_PHONE}")
+    print()
+    print("Commands:")
+    print("  - Type your message and press Enter to send")
+    print("  - Type 'quit' or 'exit' to stop")
+    print("  - Type 'new' to simulate a new phone number")
+    print()
+    print("Suggested test flow:")
+    print("  1. OUCH")
+    print("  2. 1 (or 2, or 3)")
+    print("  3. <your confession>")
+    print("  4. <your win>")
+    print("=" * 60)
+    print()
 
+    global TEST_PHONE
+    
+    while True:
+        try:
+            user_input = input("You: ").strip()
+            
+            if user_input.lower() in ['quit', 'exit']:
+                print("\nGoodbye!")
+                break
+            
+            if user_input.lower() == 'new':
+                # Generate a new phone number
+                import random
+                TEST_PHONE = f"+1555555{random.randint(1000, 9999)}"
+                print(f"\n📱 Simulating new phone number: {TEST_PHONE}\n")
+                continue
+            
+            if not user_input:
+                continue
+            
+            # Send the message and get response
+            response = send_message(user_input)
+            print(f"\n🤖 Bot: {response}\n")
+            
+        except KeyboardInterrupt:
+            print("\n\nGoodbye!")
+            break
+        except Exception as e:
+            print(f"\nError: {str(e)}\n")
 
-# Test cases to cover all state paths
-test_cases = [
-    {
-        "Body": "OUCH",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },  # Start → opt_in
-    {
-        "Body": "1",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },  # opt_in → confess
-    {
-        "Body": "TERRIBLE PRESENTATION",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },  # confess → win_prompt (NORMAL)
-    {
-        "Body": "Ouch",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },
-    {
-        "Body": "2",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },
-    {
-        "Body": "LED MEETING",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },  # win_prompt → start
-    {
-        "Body": "I NEED A COACH",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },  # confess → coaching_confirm
-    {
-        "Body": "YES",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },  # coaching_confirm → start
-    {
-        "Body": "HELP",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },  # HELP → start
-    {
-        "Body": "STOP",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    },  # STOP → start
-    {
-        "Body": "I CAN'T GO ON",
-        "From": TEST_NUMBER,
-        "To": TWILIO_NUMBER
-    }  # confess → start (EMERGENCY)
-]
-
-# Execute tests
-for case in test_cases:
-    payload = {k: v for k, v in case.items()}
-    response = send_webhook_request(payload)
-
-print("Webhook test sequence complete!")
+if __name__ == "__main__":
+    main()
