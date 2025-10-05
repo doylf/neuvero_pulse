@@ -12,17 +12,14 @@ WEBHOOK_URL = "http://localhost:8000/sms"
 TEST_PHONE = "+15555551234"  # Simulated phone number
 TWILIO_NUMBER = "+16169874525"
 
+
 def send_message(message):
     """Send a test message to the webhook"""
-    data = {
-        'Body': message,
-        'From': TEST_PHONE,
-        'To': TWILIO_NUMBER
-    }
-    
+    data = {'Body': message, 'From': TEST_PHONE, 'To': TWILIO_NUMBER}
+
     try:
         response = requests.post(WEBHOOK_URL, data=data)
-        
+
         if response.status_code == 200:
             # Parse the TwiML response
             root = ET.fromstring(response.text)
@@ -36,6 +33,7 @@ def send_message(message):
         return "Error: Cannot connect to webhook. Make sure the Flask server is running on port 8000."
     except Exception as e:
         return f"Error: {str(e)}"
+
 
 def main():
     print("=" * 60)
@@ -58,34 +56,35 @@ def main():
     print()
 
     global TEST_PHONE
-    
+
     while True:
         try:
             user_input = input("You: ").strip()
-            
+
             if user_input.lower() in ['quit', 'exit']:
                 print("\nGoodbye!")
                 break
-            
+
             if user_input.lower() == 'new':
                 # Generate a new phone number
                 import random
                 TEST_PHONE = f"+1555555{random.randint(1000, 9999)}"
                 print(f"\n📱 Simulating new phone number: {TEST_PHONE}\n")
                 continue
-            
+
             if not user_input:
                 continue
-            
+
             # Send the message and get response
             response = send_message(user_input)
             print(f"\n🤖 Bot: {response}\n")
-            
+
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
             break
         except Exception as e:
             print(f"\nError: {str(e)}\n")
+
 
 if __name__ == "__main__":
     main()
