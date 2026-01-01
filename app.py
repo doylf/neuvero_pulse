@@ -1,25 +1,32 @@
 import os
 import sys
 import uuid
+import json
+from datetime import datetime
 from flask import Flask, request, jsonify
+
+# Twilio
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
+
+# Database & AI
 from pyairtable import Api
-from datetime import datetime
 import google.generativeai as genai
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SESSION_SECRET', 'dev-secret-key-change-in-production')
+app.config['SECRET_KEY'] = os.environ.get(
+    'SESSION_SECRET', 'dev-secret-key-change-in-production')
 
-# Environment Variables
+# --- CONFIGURATION & ENV VARS ---
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
 TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY', '')
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', '')
-AIRTABLE_TABLE_NAME = os.environ.get('AIRTABLE_TABLE_NAME', 'Confessions')
+AIRTABLE_TABLE_NAME = os.environ.get('AIRTABLE_TABLE_NAME', 'Conversations')
 
+# Safety Check
 required_env_vars = {
     'TWILIO_ACCOUNT_SID': TWILIO_ACCOUNT_SID,
     'TWILIO_AUTH_TOKEN': TWILIO_AUTH_TOKEN,
@@ -28,389 +35,401 @@ required_env_vars = {
     'AIRTABLE_API_KEY': AIRTABLE_API_KEY,
     'AIRTABLE_BASE_ID': AIRTABLE_BASE_ID
 }
+
 missing_vars = [k for k, v in required_env_vars.items() if not v]
 if missing_vars:
-    error_msg = f"WARNING: Missing environment variables: {', '.join(missing_vars)}"
+    error_msg = f"CRITICAL WARNING: Missing environment variables: {', '.join(missing_vars)}"
     print(error_msg, file=sys.stderr)
 
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN else None
-airtable_api = Api(AIRTABLE_API_KEY) if AIRTABLE_API_KEY and AIRTABLE_BASE_ID else None
-confessions_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME) if airtable_api else None
-state_transitions_table = airtable_api.table(AIRTABLE_BASE_ID, 'StateTransitions') if airtable_api else None
-responses_table = airtable_api.table(AIRTABLE_BASE_ID, 'Responses') if airtable_api else None
-symptoms_table = airtable_api.table(AIRTABLE_BASE_ID, 'Symptoms') if airtable_api else None
+# --- INITIALIZE CLIENTS ---
+
+if AIRTABLE_API_KEY and AIRTABLE_BASE_ID:
+    airtable_api = Api(AIRTABLE_API_KEY)
+else:
+    airtable_api = None
+    print("Warning: Airtable not connected.")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
 else:
     gemini_model = None
+    print("Warning: Gemini AI not connected.")
 
-print("=== mybrain@work SMS Service Starting ===")
-print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
-print(f"Airtable base: {AIRTABLE_BASE_ID}")
-print(f"Airtable tables: {AIRTABLE_TABLE_NAME}, StateTransitions, Responses")
-print(f"AI Model: Google Gemini 2.0 Flash")
-print("All environment variables validated successfully")
+if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+else:
+    twilio_client = None
 
-def query_gemini(prompt):
-    if not gemini_model:
-        return "AI service not configured. Please add GEMINI_API_KEY."
-    try:
-        response = gemini_model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        print(f"Error querying Gemini AI: {str(e)}")
-        return "I'm having trouble. Try again later."
 
-def get_response_from_table(trigger):
-    if not responses_table:
-        return f"Response table not configured (trigger: {trigger})"
-    try:
-        records = responses_table.all(formula=f"{{Trigger}}='{trigger}'")
-        if records:
-            fields = records[0].get('fields', {})
-            return fields.get('Prompt', f"No response found for {trigger}")
-        return f"No response found for trigger: {trigger}"
-    except Exception as e:
-        print(f"Error fetching response from table: {str(e)}")
-        return "System error. Please try again."
+# --- DATA MANAGER (Logic Loader) ---
+class DataManager:
 
-def classify_message(message):
-    """Classify message as EMERGENCY, NORMAL, or COACHING"""
-    prompt = f"Classify in ONE word: EMERGENCY, NORMAL, or COACHING. EMERGENCY: suicide, self-harm. COACHING: advice, 'what do I do'. NORMAL: venting, doubt. Text: {message}"
-    classification = query_gemini(prompt).upper()
-    if "EMERGENCY" in classification:
-        return "EMERGENCY"
-    elif "COACHING" in classification:
-        return "COACHING"
-    else:
-        return "NORMAL"
+    def __init__(self):
+        self.flows = []
+        self.steps = []
+        self.symptoms = []
+        self.slots_def = []
+        if airtable_api:
+            self.refresh_data()
 
-def match_stressor(message):
-    if not symptoms_table:
+    def refresh_data(self):
+        """Loads all logic tables from Airtable into memory."""
+        print("Loading Logic from Airtable...")
+        try:
+            base = airtable_api.base(AIRTABLE_BASE_ID)
+            self.flows = base.table('Flows').all()
+            self.steps = base.table('Steps').all(sort=['step_order'])
+            try:
+                self.symptoms = base.table('Symptoms').all()
+            except:
+                print("Warning: Symptoms table not found or empty.")
+                self.symptoms = []
+            self.slots_def = base.table('Slots').all()
+            print(f"Loaded {len(self.flows)} flows, {len(self.steps)} steps.")
+        except Exception as e:
+            print(f"CRITICAL ERROR loading Airtable data: {e}")
+
+    def get_flow(self, flow_id):
+        return next(
+            (f['fields']
+             for f in self.flows if f['fields'].get('flow_id') == flow_id),
+            None)
+
+    def get_steps_for_flow(self, flow_id):
+        return [
+            s['fields'] for s in self.steps
+            if s['fields'].get('flow_id') == flow_id
+        ]
+
+    def find_trigger_flow(self, user_text):
+        """Checks if text matches any flow triggers."""
+        text = user_text.upper()
+        for flow in self.flows:
+            triggers = flow['fields'].get('triggers', '').upper().split(',')
+            triggers = [t.strip() for t in triggers if t.strip()]
+            for trigger in triggers:
+                if trigger in text:
+                    return flow['fields']
         return None
-    try:
-        message_lower = message.lower()
-        records = symptoms_table.all(view='Grid view')  # Use your view name if set
-        for record in records:
-            fields = record.get('fields', {})
-            # Combine keywords + long-tail for broader matching
-            all_terms = []
-            keywords = fields.get('Keywords', '').lower()
-            if keywords:
-                all_terms.extend([kw.strip() for kw in keywords.split(',')])
-            long_tails = fields.get('LongTailQueries', '').lower()
-            if long_tails:
-                all_terms.extend([lt.strip().strip('"') for lt in long_tails.split(',')])
 
-            for term in all_terms:
-                if term and term in message_lower:
-                    return {
-                        'id': fields.get('ID'),
-                        'symptom': fields.get('Symptom'),
-                        'matched_term': term
+
+# Initialize Data Manager
+db = DataManager()
+
+# Session Storage (In-Memory for Dev)
+user_sessions = {}
+
+
+# --- ACTION ENGINE ---
+class ActionEngine:
+
+    @staticmethod
+    def execute(action_name, session, user_phone):
+        """Runs the python code associated with an 'action' step."""
+        print(f"Executing Action: {action_name}")
+        slots = session['slots']
+
+        if action_name == 'analyze_stress_gemini':
+            user_message = slots.get('user_message', '')
+            trigger = slots.get('stress_trigger', 'Unknown')
+
+            # Build Knowledge Base Context
+            kb_text = "\n".join([
+                f"- {s['fields'].get('symptom_name','Pattern')}: {s['fields'].get('keywords','')}"
+                for s in db.symptoms
+            ])
+
+            prompt = f"""
+            Act as a career coach. Analyze this user message: "{user_message}".
+            Context: The user blames "{trigger}".
+
+            Here is your knowledge base of stress patterns:
+            {kb_text}
+
+            1. Match the user_message to ONE symptom pattern from the list.
+            2. Determine if this is an EMERGENCY (self-harm/danger) or NORMAL.
+
+            Return ONLY JSON format: {{ "pattern": "Pattern Name", "category": "NORMAL" or "EMERGENCY" }}
+            """
+
+            try:
+                if gemini_model:
+                    response = gemini_model.generate_content(prompt)
+                    cleaned_text = response.text.strip().replace(
+                        '```json', '').replace('```', '')
+                    analysis = json.loads(cleaned_text)
+                    slots['ai_analysis'] = analysis
+                else:
+                    slots['ai_analysis'] = {
+                        "category": "NORMAL",
+                        "pattern": "Test Mode"
                     }
+            except Exception as e:
+                print(f"Gemini Error: {e}")
+                slots['ai_analysis'] = {
+                    "category": "NORMAL",
+                    "pattern": "Unknown"
+                }
+            return None
+
+        elif action_name == 'generate_final_advice':
+            analysis = slots.get('ai_analysis', {})
+            subtype = slots.get('subtype_choice', 'General')
+            pattern = analysis.get('pattern', 'General Stress')
+
+            prompt = f"""
+            The user is suffering from "{pattern}".
+            They identified their neuro-subtype as "{subtype}".
+            Write a short (under 160 chars), empathetic text message with one specific actionable tip.
+            """
+            try:
+                if gemini_model:
+                    resp = gemini_model.generate_content(prompt)
+                    slots['final_advice'] = resp.text.strip()
+                else:
+                    slots[
+                        'final_advice'] = "Take a deep breath. (AI Test Mode)"
+            except:
+                slots[
+                    'final_advice'] = "Take a deep breath. We will get through this."
+            return None
+
+        elif action_name == 'log_to_airtable':
+            try:
+                if airtable_api:
+                    base = airtable_api.base(AIRTABLE_BASE_ID)
+                    base.table(AIRTABLE_TABLE_NAME).create({
+                        "phone":
+                        user_phone,
+                        "user_message":
+                        slots.get('user_message'),
+                        "timestamp":
+                        datetime.now().isoformat(),
+                        "gemini_response":
+                        slots.get('final_advice')
+                    })
+            except Exception as e:
+                print(f"Logging Error: {e}")
+            return None
+
+        elif action_name == 'alert_admin':
+            print("ALERT: Admin notified of emergency.")
+            return None
+
+        elif action_name == 'complete_onboarding':
+            # Logic to mark user as 'onboarded' in DB
+            pass
+
         return None
-    except Exception as e:
-        print(f"Symptom matching error: {str(e)}")
-        return None
-        
 
-def get_state_transition(current_state, input_trigger, classification=None):
-    """Query StateTransitions table to determine next state"""
-    if not state_transitions_table:
-        return None, None
-    try:
-        # Priority 1: Exact match with classification condition (if classification provided)
-        if classification:
-            formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='{input_trigger}', {{Condition}}='classification={classification}')"
-            records = state_transitions_table.all(formula=formula, sort=["-Weight"])
-            if records:
-                fields = records[0].get('fields', {})
-                return fields.get('NextState', current_state), fields.get('ActionTrigger', 'DEFAULT')
-        
-        # Priority 2: Exact match without classification condition (standard transitions)
-        formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='{input_trigger}')"
-        records = state_transitions_table.all(formula=formula, sort=["-Weight"])
-        if records:
-            fields = records[0].get('fields', {})
-            return fields.get('NextState', current_state), fields.get('ActionTrigger', 'DEFAULT')
-        
-        # Priority 3: Wildcard with classification (if classification provided)
-        if classification:
-            formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='*', {{Condition}}='classification={classification}')"
-            records = state_transitions_table.all(formula=formula, sort=["-Weight"])
-            if records:
-                fields = records[0].get('fields', {})
-                return fields.get('NextState', current_state), fields.get('ActionTrigger', 'DEFAULT')
-        
-        # Priority 4: Wildcard without classification (final fallback)
-        formula = f"AND({{CurrentState}}='{current_state}', {{InputTrigger}}='*')"
-        records = state_transitions_table.all(formula=formula, sort=["-Weight"])
-        if records:
-            fields = records[0].get('fields', {})
-            return fields.get('NextState', current_state), fields.get('ActionTrigger', 'DEFAULT')
-        
-        return current_state, 'DEFAULT'
-    except Exception as e:
-        print(f"Error fetching state transition: {str(e)}")
-        return current_state, 'DEFAULT'
 
-def get_past_wins(phone_number, conversation_id):
-    """Fetch ALL past wins for a phone number from Airtable (not conversation-scoped)"""
-    if not confessions_table:
-        return []
-    try:
-        formula = f"AND({{phone}}='{phone_number}', {{win}}!='')"
-        records = confessions_table.all(formula=formula, sort=["timestamp"])
-        wins = [record['fields'].get('win', '').strip() for record in records if record['fields'].get('win', '').strip()]
-        return wins
-    except Exception as e:
-        print(f"Error fetching past wins: {str(e)}")
-        return []
+# --- CORE LOGIC LOOP ---
 
-def get_user_state(phone_number):
-    if not confessions_table:
-        return "start", None, None, None, None, True
-    try:
-        records = confessions_table.all(formula=f"{{phone}}='{phone_number}'", sort=["-timestamp"])
-        if records:
-            fields = records[0].get('fields', {})
-            step = fields.get('step', 'start')
-            last_confession = fields.get('confession', '')
-            last_win = fields.get('win', '')
-            conversation_id = fields.get('conversation_id', None)
-            conversation_type = fields.get('conversation_type', None)
-            
-            # Legacy: Map old win_prompt state to start for backward compatibility
-            if step == 'win_prompt':
-                step = 'start'
-            
-            return step, last_confession, last_win, conversation_id, conversation_type, False
-        return "start", None, None, None, None, True
-    except Exception as e:
-        print(f"Error getting user state: {str(e)}")
-        return "start", None, None, None, None, True
 
-def delete_user_data(phone_number):
-    if not confessions_table:
-        print("ERROR: Airtable Confessions table not configured - skipping delete")
-        return False
-    try:
-        records = confessions_table.all(formula=f"{{phone}}='{phone_number}'")
-        if records:
-            for record in records:
-                confessions_table.delete(record['id'])
-            print(f"SUCCESS: Deleted {len(records)} records for {phone_number}")
-            return True
-        else:
-            print(f"No records found for {phone_number}")
-            return True
-    except Exception as e:
-        print(f"ERROR deleting user data: {str(e)}")
-        return False
+def check_guard(guard_str, user_input, slots):
+    """
+    Evaluates the 'Guard' condition string. 
+    Returns TRUE if the guard BLOCKS execution (Condition failed).
+    """
+    if not guard_str:
+        return False  # No guard, no block
 
-def save_to_airtable(phone, confession, win, step, conversation_id, conversation_type, gemini_prompt=None, gemini_response=None):
-    if not confessions_table:
-        print("ERROR: Airtable Confessions table not configured - skipping save")
-        return False
-    try:
-        record = {
-            "phone": phone,
-            "confession": confession,
-            "win": win,
-            "step": step,
-            "conversation_id": conversation_id,
-            "conversation_type": conversation_type
-        }
-        if gemini_prompt:
-            record["gemini_prompt"] = gemini_prompt
-        if gemini_response:
-            record["gemini_response"] = gemini_response
-        print(f"Attempting to save to Airtable: {record}")
-        result = confessions_table.create(record)
-        print(f"SUCCESS: Saved to Airtable with record ID: {result.get('id', 'unknown')}")
-        return True
-    except Exception as e:
-        print(f"ERROR saving to Airtable: {str(e)}")
-        return False
+    if "input !=" in guard_str:
+        target = guard_str.split("!=")[1].strip().replace("'",
+                                                          "").replace('"', "")
+        return user_input.upper() != target.upper()
+
+    if "ai_analysis.category ==" in guard_str:
+        target = guard_str.split("==")[1].strip().replace("'",
+                                                          "").replace('"', "")
+        analysis = slots.get('ai_analysis', {})
+        # Note: For branching, we return the boolean directly
+        return analysis.get('category') == target
+
+    return False
+
+
+def process_conversation(phone, user_input):
+    """The main engine driver."""
+    session = user_sessions.get(phone, {
+        'current_flow': None,
+        'step_order': 0,
+        'slots': {},
+        'pending_slot': None
+    })
+
+    # 1. ROUTER: Check for Context Switching
+    new_flow_obj = db.find_trigger_flow(user_input)
+
+    if new_flow_obj:
+        # Check if current flow is Locked
+        current_flow_id = session['current_flow']
+        current_flow_def = db.get_flow(
+            current_flow_id) if current_flow_id else None
+
+        is_locked = current_flow_def.get(
+            'is_locked') if current_flow_def else False
+
+        # If not locked (or user is forcing start/restart), switch
+        if not is_locked or new_flow_obj['flow_id'] == current_flow_id:
+            print(f"Switching context to {new_flow_obj['flow_id']}")
+            session = {
+                'current_flow': new_flow_obj['flow_id'],
+                'step_order': 0,
+                'slots': {},
+                'pending_slot': None
+            }
+            user_sessions[phone] = session
+
+    # If no session, start default prompt
+    if not session['current_flow']:
+        return "I'm listening. Text OUCH to start."
+
+    # 2. RUN STEPS LOOP
+    response_buffer = []
+
+    while True:
+        # Get all steps for this flow
+        steps = db.get_steps_for_flow(session['current_flow'])
+
+        # End of Flow Check
+        if session['step_order'] >= len(steps):
+            session['current_flow'] = None
+            break
+
+        current_step = steps[session['step_order']]
+        step_type = current_step.get('step_type')
+        content = current_step.get('content')
+        variable = current_step.get('variable')
+        guard = current_step.get('guard')
+
+        # --- EXECUTE STEP TYPES ---
+
+        if step_type == 'response':
+            # Replace variables {{variable}}
+            out_text = content
+            if '{' in out_text:
+                for k, v in session['slots'].items():
+                    val = str(v) if v is not None else ""
+                    out_text = out_text.replace(f"{{{k}}}", val)
+            response_buffer.append(out_text)
+            session['step_order'] += 1
+
+        elif step_type == 'action':
+            ActionEngine.execute(content, session, phone)
+            session['step_order'] += 1
+
+        elif step_type == 'branch':
+            # Logic: If Condition is Met, Jump. Else, Continue.
+            condition_met = check_guard(guard, user_input, session['slots'])
+            if condition_met:
+                print(f"Branching to {content}")
+                session['current_flow'] = content
+                session['step_order'] = 0
+                continue  # Restart loop with new flow
+            else:
+                session['step_order'] += 1
+
+        elif step_type == 'validate':
+            # Logic: If Guard Blocks (True), Return Error.
+            is_blocked = check_guard(guard, user_input, session['slots'])
+            if is_blocked:
+                # Guard FAILED. Stop and ask again.
+                response_buffer.append(f"Please reply with '{content}'.")
+                user_sessions[
+                    phone] = session  # Save state (stay on this step)
+                return "\n".join(response_buffer)
+
+            session['step_order'] += 1
+
+        elif step_type == 'collect':
+            # Logic: Do we have this data in slots?
+            if variable in session['slots']:
+                # We have it, move on.
+                session['step_order'] += 1
+            else:
+                # We need it.
+                session['pending_slot'] = variable
+                # We do NOT increment step_order. We wait here.
+                # Break the loop to send buffered responses (questions).
+                break
+
+    # Save session
+    user_sessions[phone] = session
+
+    if not response_buffer:
+        return ""
+
+    return "\n".join(response_buffer)
+
+
+# --- ROUTES ---
+
 
 @app.route('/sms', methods=['POST'])
 def sms_reply():
+    """Twilio Webhook"""
     if missing_vars:
-        return jsonify({"error": "Service not configured", "missing": missing_vars}), 500
+        return jsonify({
+            "error": "Service Config Error",
+            "missing": missing_vars
+        }), 500
+
+    incoming_msg = request.values.get('Body', '').strip()
+    from_number = request.values.get('From', '')
+
+    print(f"SMS From {from_number}: {incoming_msg}")
+
+    # Handle Slot Filling from Previous Turn
+    session = user_sessions.get(from_number)
+    is_trigger = db.find_trigger_flow(incoming_msg)
+
+    # If waiting for slot AND input is not a new trigger (like HELP), save data
+    if session and session.get('pending_slot') and not is_trigger:
+        slot_name = session['pending_slot']
+        print(f"Filling Slot {slot_name} with '{incoming_msg}'")
+        session['slots'][slot_name] = incoming_msg
+        session['pending_slot'] = None  # Clear it
+        user_sessions[from_number] = session
+
+    # Run Engine
     try:
-        incoming_msg = request.form.get('Body', '').strip().upper()
-        incoming_msg_original = request.form.get('Body', '').strip()
-        from_number = request.form.get('From', '')
-        to_number = request.form.get('To', '')
-        print(f"Received SMS from {from_number}: {incoming_msg}")
-
-        current_step, last_confession, last_win, conversation_id, conversation_type, is_first_time = get_user_state(from_number)
-        print(f"Current state: step={current_step}, conversation_id={conversation_id}, conversation_type={conversation_type}")
-
-        response_text = ""
-        new_step = current_step
-        confession_to_save = incoming_msg_original
-        win_to_save = ""
-        new_conversation_id = conversation_id or str(uuid.uuid4())
-        new_conversation_type = conversation_type
-        gemini_prompt_to_save = None
-        gemini_response_to_save = None
-        skip_save = False
-
-        # SPECIAL COMMANDS: Handle special keywords first (before classification)
-        if incoming_msg == "STOP":
-            response_text = get_response_from_table("STOP")
-            delete_user_data(from_number)
-            resp = MessagingResponse()
-            resp.message(response_text)
-            return str(resp)
-        
-        if incoming_msg == "HELP":
-            response_text = get_response_from_table("HELP")
-            save_to_airtable(from_number, incoming_msg_original, "", current_step, new_conversation_id, conversation_type)
-            resp = MessagingResponse()
-            resp.message(response_text)
-            return str(resp)
-        
-        if incoming_msg == "OUCH":
-            new_conversation_id = str(uuid.uuid4())
-            new_conversation_type = None
-            new_step = "opt_in"
-            
-            if is_first_time:
-                response_text = get_response_from_table("SUBSCRIBE")
-            else:
-                response_text = "Welcome back! Reply:\n1. Co-worker\n2. Boss\n3. Self-doubt\n\nOr HELP/STOP"
-            
-            save_to_airtable(from_number, "OUCH", "", new_step, new_conversation_id, new_conversation_type)
-            resp = MessagingResponse()
-            resp.message(response_text)
-            return str(resp)
-        
-        # SAFETY: Classify ALL other messages for emergency/coaching detection (state-independent)
-        classification = classify_message(incoming_msg_original)
-        print(f"Message classified as: {classification}")
-        
-        # EMERGENCY: Immediate response regardless of state
-        if classification == "EMERGENCY":
-            response_text = get_response_from_table("EMERGENCY")
-            save_to_airtable(from_number, incoming_msg_original, "", "start", new_conversation_id, conversation_type)
-            resp = MessagingResponse()
-            resp.message(response_text)
-            return str(resp)
-        
-        # COACHING: Offer coaching support regardless of state
-        if classification == "COACHING":
-            response_text = get_response_from_table("COACHING_CONFIRM_PROMPT")
-            new_step = "coaching_confirm"
-            save_to_airtable(from_number, incoming_msg_original, "", new_step, new_conversation_id, conversation_type)
-            resp = MessagingResponse()
-            resp.message(response_text)
-            return str(resp)
-        
-        # Normal state machine flow
-        else:
-            
-            next_state, action_trigger = get_state_transition(current_step, incoming_msg, classification)
-            
-            # Strip whitespace from action_trigger to handle Airtable data issues
-            if action_trigger:
-                action_trigger = action_trigger.strip()
-            
-            print(f"Transition: {current_step} + '{incoming_msg}' -> {next_state} (Action: {action_trigger})")
-            
-            # Update state
-            new_step = next_state if next_state else current_step
-            
-            # SPECIAL HANDLING: confess state with NORMAL classification needs AI response
-            if current_step == "confess" and classification == "NORMAL":
-                past_wins = get_past_wins(from_number, new_conversation_id)
-                
-                trigger_context = new_conversation_type.lower() if new_conversation_type else "workplace"
-                
-                # Select appropriate AI prompt template based on whether past wins exist
-                if past_wins:
-                    past_wins_text = ", ".join(past_wins)
-                    prompt_template = get_response_from_table("AI_PROMPT_TEMPLATE")
-                else:
-                    past_wins_text = "none"
-                    prompt_template = get_response_from_table("AI_PROMPT_TEMPLATE_NO_WINS")
-                
-                # Replace placeholders with actual values
-                prompt = prompt_template.replace("{user_message}", incoming_msg_original)
-                prompt = prompt.replace("{trigger_context}", trigger_context)
-                prompt = prompt.replace("{past_win}", past_wins_text)
-                
-                ai_response = query_gemini(prompt)
-                response_text = ai_response
-                
-                # Capture Gemini prompt and response for Airtable
-                gemini_prompt_to_save = prompt
-                gemini_response_to_save = ai_response
-            
-            # Handle actions based on ActionTrigger from StateTransitions
-            elif action_trigger == "HELP":
-                response_text = get_response_from_table("HELP")
-            
-            elif action_trigger == "DEFAULT":
-                response_text = get_response_from_table("DEFAULT")
-            
-            elif action_trigger in ["Co-worker", "Boss", "Self-doubt"]:
-                # User selected trigger in opt_in state
-                new_conversation_type = action_trigger
-                response_text = get_response_from_table(action_trigger)
-                confession_to_save = action_trigger
-            
-            elif action_trigger == "EMERGENCY":
-                response_text = get_response_from_table("EMERGENCY")
-            
-            elif action_trigger == "COACHING_CONFIRM_PROMPT":
-                response_text = get_response_from_table("COACHING_CONFIRM_PROMPT")
-            
-            elif action_trigger == "COACHING_CONFIRM_YES":
-                response_text = get_response_from_table("COACHING_CONFIRM_YES")
-            
-            elif action_trigger == "COACHING_CONFIRM_NO":
-                response_text = get_response_from_table("COACHING_CONFIRM_NO")
-            
-            elif action_trigger in ["WIN_PROMPT", "AWAITING_WIN"]:
-                # User is in awaiting_win state - save their response as a win
-                win_to_save = incoming_msg_original
-                confession_to_save = ""
-                response_text = get_response_from_table("WIN_PROMPT")
-
-        # Save to Airtable unless skipped
-        if not skip_save:
-            save_to_airtable(from_number, confession_to_save, win_to_save, new_step, new_conversation_id, new_conversation_type, gemini_prompt_to_save, gemini_response_to_save)
-
-        # Defensive: ensure response_text is not empty
-        if not response_text or not response_text.strip():
-            response_text = "Sorry, I didn't understand that. Text HELP for support or OUCH to start over."
-            print(f"WARNING: Empty response_text, using default")
-
-        # Send response
-        resp = MessagingResponse()
-        resp.message(response_text)
-        return str(resp), 200, {'Content-Type': 'text/xml'}
-
+        response_text = process_conversation(from_number, incoming_msg)
     except Exception as e:
-        print(f"Error processing SMS: {str(e)}")
+        print(f"Engine Error: {e}")
         import traceback
         traceback.print_exc()
-        resp = MessagingResponse()
-        resp.message("Sorry, I encountered an error processing your message.")
-        return str(resp), 200, {'Content-Type': 'text/xml'}
+        response_text = "System Error. Text STOP."
+
+    # Send Response
+    resp = MessagingResponse()
+    resp.message(response_text)
+    return str(resp)
+
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "healthy", "service": "mybrain@work SMS service"}), 200
+    return jsonify({
+        "status": "healthy",
+        "service": "mybrain@work SMS service"
+    }), 200
+
+
+@app.route('/refresh', methods=['GET'])
+def refresh_logic():
+    """Endpoint to force reload Airtable logic without restart"""
+    db.refresh_data()
+    return jsonify({"status": "Logic Refreshed"}), 200
+
 
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "mybrain@work SMS service is running", "webhook_endpoint": "/sms"}), 200
+    return jsonify({
+        "message": "mybrain@work SMS service is running",
+        "webhook_endpoint": "/sms"
+    }), 200
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=False)
