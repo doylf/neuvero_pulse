@@ -38,6 +38,7 @@ airtable_api = Api(AIRTABLE_API_KEY) if AIRTABLE_API_KEY and AIRTABLE_BASE_ID el
 confessions_table = airtable_api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME) if airtable_api else None
 state_transitions_table = airtable_api.table(AIRTABLE_BASE_ID, 'StateTransitions') if airtable_api else None
 responses_table = airtable_api.table(AIRTABLE_BASE_ID, 'Responses') if airtable_api else None
+symptoms_table = airtable_api.table(AIRTABLE_BASE_ID, 'Symptoms') if airtable_api else None
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -85,6 +86,36 @@ def classify_message(message):
         return "COACHING"
     else:
         return "NORMAL"
+
+def match_stressor(message):
+    if not symptoms_table:
+        return None
+    try:
+        message_lower = message.lower()
+        records = symptoms_table.all(view='Grid view')  # Use your view name if set
+        for record in records:
+            fields = record.get('fields', {})
+            # Combine keywords + long-tail for broader matching
+            all_terms = []
+            keywords = fields.get('Keywords', '').lower()
+            if keywords:
+                all_terms.extend([kw.strip() for kw in keywords.split(',')])
+            long_tails = fields.get('LongTailQueries', '').lower()
+            if long_tails:
+                all_terms.extend([lt.strip().strip('"') for lt in long_tails.split(',')])
+
+            for term in all_terms:
+                if term and term in message_lower:
+                    return {
+                        'id': fields.get('ID'),
+                        'symptom': fields.get('Symptom'),
+                        'matched_term': term
+                    }
+        return None
+    except Exception as e:
+        print(f"Symptom matching error: {str(e)}")
+        return None
+        
 
 def get_state_transition(current_state, input_trigger, classification=None):
     """Query StateTransitions table to determine next state"""
