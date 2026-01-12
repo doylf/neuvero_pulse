@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["config", "slots", "flows"],
+  "properties": {
+    "config": {
+      "type": "object",
+      "properties": {
+        "default_fallback": { "type": "string" }
+      }
+    },
+    "slots": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z0-9_]+$": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "enum": ["text", "number", "boolean", "json"] },
+            "persist": { "type": "boolean" },
+            "description": { "type": "string" }
+          }
+        }
+      }
+    },
+    "flows": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z0-9_]+$": {
+          "type": "object",
+          "required": ["steps"],
+          "properties": {
+            "description": { "type": "string" },
+            "triggers": { "type": "array", "items": { "type": "string" } },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "type"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "type": { "enum": ["response", "collect", "action", "branch", "schedule"] }
+                },
+                "allOf": [
+                  {
+                    "if": { "properties": { "type": { "const": "response" } } },
+                    "then": { "required": ["content"] }
+                  },
+                  {
+                    "if": { "properties": { "type": { "const": "collect" } } },
+                    "then": { "required": ["variable"] }
+                  },
+                  {
+                    "if": { "properties": { "type": { "const": "branch" } } },
+                    "then": { "required": ["condition", "target_flow"] }
+                  },
+                  {
+                    "if": { "properties": { "type": { "const": "action" } } },
+                    "then": { "required": ["action_name"] }
+                  },
+                  {
+                    "if": { "properties": { "type": { "const": "schedule" } } },
+                    "then": { "required": ["delay_hours"] }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

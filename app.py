@@ -13,6 +13,7 @@ from twilio.rest import Client
 
 from supabase import create_client, Client as SupabaseClient
 import google.generativeai as genai
+from jsonschema import validate, ValidationError
 from system_prompt import SYSTEM_PROMPT
 
 app = Flask(__name__)
@@ -254,13 +255,38 @@ class ConversationLogger:
 
 class DataManager:
 
-    def __init__(self, yaml_path='flows.yaml'):
+    def __init__(self, yaml_path='flows.yaml', schema_path='flow_schema.json'):
         self.yaml_path = yaml_path
+        self.schema_path = schema_path
+        self.schema = None
+        self.config = {}
         self.flows = []
         self.steps = []
         self.symptoms = []
         self.slots_def = []
+        self.load_schema()
         self.refresh_data()
+
+    def load_schema(self):
+        try:
+            with open(self.schema_path, 'r') as f:
+                self.schema = json.load(f)
+            print(f"Loaded validation schema from {self.schema_path}")
+        except FileNotFoundError:
+            print(f"Warning: Schema file not found: {self.schema_path}")
+        except Exception as e:
+            print(f"Warning: Could not load schema: {e}")
+
+    def validate_yaml(self, data):
+        if not self.schema:
+            return True
+        try:
+            validate(instance=data, schema=self.schema)
+            print("YAML validation passed.")
+            return True
+        except ValidationError as e:
+            print(f"YAML validation warning: {e.message}")
+            return False
 
     def refresh_data(self):
         print(f"Loading Logic from YAML file: {self.yaml_path}")
@@ -268,12 +294,15 @@ class DataManager:
             with open(self.yaml_path, 'r') as f:
                 data = yaml.safe_load(f)
             
+            self.validate_yaml(data)
+            
+            self.config = data.get('config', {})
             self.flows = data.get('flows', [])
             self.steps = sorted(data.get('steps', []), key=lambda s: s.get('step_order', 0))
             self.symptoms = data.get('symptoms', [])
             self.slots_def = data.get('slots', [])
             
-            print(f"Loaded {len(self.flows)} flows, {len(self.steps)} steps, {len(self.symptoms)} symptoms, {len(self.slots_def)} slots.")
+            print(f"Loaded {len(self.flows)} flows, {len(self.steps)} steps, {len(self.symptoms)} symptoms, {len(self.slots_def) if isinstance(self.slots_def, list) else len(self.slots_def.keys())} slots.")
         except FileNotFoundError:
             print(f"ERROR: YAML file not found: {self.yaml_path}")
         except Exception as e:
