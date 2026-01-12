@@ -3,34 +3,30 @@ import sys
 import json
 from flask import Flask, request, jsonify
 
-# Twilio
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 
-# Database & AI
-from pyairtable import Api
+from supabase import create_client, Client as SupabaseClient
 import google.generativeai as genai
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get(
     'SESSION_SECRET', 'dev-secret-key-change-in-production')
 
-# --- CONFIGURATION & ENV VARS ---
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
 TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY', '')
-AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', '')
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
 
-# Safety Check
 required_env_vars = {
     'TWILIO_ACCOUNT_SID': TWILIO_ACCOUNT_SID,
     'TWILIO_AUTH_TOKEN': TWILIO_AUTH_TOKEN,
     'TWILIO_PHONE_NUMBER': TWILIO_PHONE_NUMBER,
     'GEMINI_API_KEY': GEMINI_API_KEY,
-    'AIRTABLE_API_KEY': AIRTABLE_API_KEY,
-    'AIRTABLE_BASE_ID': AIRTABLE_BASE_ID
+    'SUPABASE_URL': SUPABASE_URL,
+    'SUPABASE_SERVICE_ROLE_KEY': SUPABASE_SERVICE_ROLE_KEY
 }
 
 missing_vars = [k for k, v in required_env_vars.items() if not v]
@@ -38,13 +34,12 @@ if missing_vars:
     error_msg = f"CRITICAL WARNING: Missing environment variables: {', '.join(missing_vars)}"
     print(error_msg, file=sys.stderr)
 
-# --- INITIALIZE CLIENTS ---
-
-if AIRTABLE_API_KEY and AIRTABLE_BASE_ID:
-    airtable_api = Api(AIRTABLE_API_KEY)
+supabase: SupabaseClient = None
+if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    print("Supabase connected successfully.")
 else:
-    airtable_api = None
-    print("Warning: Airtable not connected.")
+    print("Warning: Supabase not connected.")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -59,7 +54,6 @@ else:
     twilio_client = None
 
 
-# --- DATA MANAGER (Logic Loader) ---
 class DataManager:
 
     def __init__(self):
@@ -67,63 +61,60 @@ class DataManager:
         self.steps = []
         self.symptoms = []
         self.slots_def = []
-        if airtable_api:
+        if supabase:
             self.refresh_data()
 
     def refresh_data(self):
-        """Loads all logic tables from Airtable into memory."""
-        print("Loading Logic from Airtable...")
+        print("Loading Logic from Supabase...")
         try:
-            base = airtable_api.base(AIRTABLE_BASE_ID)
-            self.flows = base.table('Flows').all()
-            self.steps = base.table('Steps').all(sort=['step_order'])
+            flows_resp = supabase.table('flows').select('*').execute()
+            self.flows = flows_resp.data if flows_resp.data else []
+            
+            steps_resp = supabase.table('steps').select('*').order('step_order').execute()
+            self.steps = steps_resp.data if steps_resp.data else []
+            
             try:
-                self.symptoms = base.table('Symptoms').all()
+                symptoms_resp = supabase.table('symptoms').select('*').execute()
+                self.symptoms = symptoms_resp.data if symptoms_resp.data else []
             except:
                 print("Warning: Symptoms table not found or empty.")
                 self.symptoms = []
-            self.slots_def = base.table('Slots').all()
+            
+            slots_resp = supabase.table('slots').select('*').execute()
+            self.slots_def = slots_resp.data if slots_resp.data else []
+            
             print(f"Loaded {len(self.flows)} flows, {len(self.steps)} steps.")
         except Exception as e:
-            print(f"CRITICAL ERROR loading Airtable data: {e}")
+            print(f"CRITICAL ERROR loading Supabase data: {e}")
 
     def get_flow(self, flow_id):
         return next(
-            (f['fields']
-             for f in self.flows if f['fields'].get('flow_id') == flow_id),
+            (f for f in self.flows if f.get('flow_id') == flow_id),
             None)
 
     def get_steps_for_flow(self, flow_id):
-        return [
-            s['fields'] for s in self.steps
-            if s['fields'].get('flow_id') == flow_id
-        ]
+        return [s for s in self.steps if s.get('flow_id') == flow_id]
 
     def find_trigger_flow(self, user_text):
-        """Checks if text matches any flow triggers."""
         text = user_text.upper()
         for flow in self.flows:
-            triggers = flow['fields'].get('triggers', '').upper().split(',')
+            triggers = flow.get('triggers', '').upper().split(',')
             triggers = [t.strip() for t in triggers if t.strip()]
             for trigger in triggers:
                 if trigger in text:
-                    return flow['fields']
+                    return flow
         return None
 
 
-# Initialize Data Manager
 db = DataManager()
 
-# Session Storage (In-Memory for Dev)
 user_sessions = {}
 
 
-# --- ACTION ENGINE ---
 class ActionEngine:
 
     @staticmethod
     def execute(action_name, session, user_phone):
-        """Runs the python code associated with an 'action' step."""
         print(f"Executing Action: {action_name}")
         slots = session['slots']
 
@@ -133,9 +124,8 @@ class ActionEngine:
             user_message = slots.get('user_message', '')
             trigger = slots.get('stress_trigger', 'Unknown')
 
-            # Build Knowledge Base Context
             kb_text = "\n".join([
-                f"- {s['fields'].get('symptom_name','Pattern')}: {s['fields'].get('keywords','')}"
+                f"- {s.get('symptom_name','Pattern')}: {s.get('keywords','')}"
                 for s in db.symptoms
             ])
 
@@ -187,25 +177,19 @@ class ActionEngine:
                     resp = gemini_model.generate_content(prompt)
                     slots['final_advice'] = resp.text.strip()
                 else:
-                    slots[
-                        'final_advice'] = "Take a deep breath. (AI Test Mode)"
+                    slots['final_advice'] = "Take a deep breath. (AI Test Mode)"
             except:
-                slots[
-                    'final_advice'] = "Take a deep breath. We will get through this."
+                slots['final_advice'] = "Take a deep breath. We will get through this."
             return None
 
-        elif action_name == 'log_to_airtable':
+        elif action_name == 'log_to_supabase':
             try:
-                if airtable_api:
-                    base = airtable_api.base(AIRTABLE_BASE_ID)
-                    base.table('Conversations').create({
-                        "phone":
-                        user_phone,
-                        "user_message":
-                        slots.get('user_message'),
-                        "gemini_response":
-                        slots.get('final_advice')
-                    })
+                if supabase:
+                    supabase.table('conversations').insert({
+                        "phone": user_phone,
+                        "user_message": slots.get('user_message'),
+                        "gemini_response": slots.get('final_advice')
+                    }).execute()
             except Exception as e:
                 print(f"Logging Error: {e}")
             return None
@@ -213,22 +197,17 @@ class ActionEngine:
         elif action_name == 'save_win':
             win_text = slots.get('win_text')
             try:
-                if airtable_api:
-                    base = airtable_api.base(AIRTABLE_BASE_ID)
-                    # We save to the 'Conversations' table, populating the 'win' column
-                    base.table('Conversations').create({
-                        "phone":
-                        user_phone,
-                        "win":
-                        win_text,
-                        "conversation_type":
-                        "win_submission"
-                    })
-                    print(f"Successfully saved win to Airtable: {win_text}")
+                if supabase:
+                    supabase.table('conversations').insert({
+                        "phone": user_phone,
+                        "win": win_text,
+                        "conversation_type": "win_submission"
+                    }).execute()
+                    print(f"Successfully saved win to Supabase: {win_text}")
                 else:
-                    print("Error: Airtable API not connected.")
+                    print("Error: Supabase not connected.")
             except Exception as e:
-                print(f"Error saving win to Airtable: {e}")
+                print(f"Error saving win to Supabase: {e}")
             return None
 
         elif action_name == 'alert_admin':
@@ -236,40 +215,28 @@ class ActionEngine:
             return None
 
         elif action_name == 'complete_onboarding':
-            # Logic to mark user as 'onboarded' in DB
             pass
 
         return None
 
 
-# --- CORE LOGIC LOOP ---
-
-
 def check_guard(guard_str, user_input, slots):
-    """
-    Evaluates the 'Guard' condition string. 
-    Returns TRUE if the guard BLOCKS execution (Condition failed).
-    """
     if not guard_str:
-        return False  # No guard, no block
+        return False
 
     if "input !=" in guard_str:
-        target = guard_str.split("!=")[1].strip().replace("'",
-                                                          "").replace('"', "")
+        target = guard_str.split("!=")[1].strip().replace("'", "").replace('"', "")
         return user_input.upper() != target.upper()
 
     if "ai_analysis.category ==" in guard_str:
-        target = guard_str.split("==")[1].strip().replace("'",
-                                                          "").replace('"', "")
+        target = guard_str.split("==")[1].strip().replace("'", "").replace('"', "")
         analysis = slots.get('ai_analysis', {})
-        # Note: For branching, we return the boolean directly
         return analysis.get('category') == target
 
     return False
 
 
 def process_conversation(phone, user_input):
-    """The main engine driver."""
     session = user_sessions.get(phone, {
         'current_flow': None,
         'step_order': 0,
@@ -277,19 +244,14 @@ def process_conversation(phone, user_input):
         'pending_slot': None
     })
 
-    # 1. ROUTER: Check for Context Switching
     new_flow_obj = db.find_trigger_flow(user_input)
 
     if new_flow_obj:
-        # Check if current flow is Locked
         current_flow_id = session['current_flow']
-        current_flow_def = db.get_flow(
-            current_flow_id) if current_flow_id else None
+        current_flow_def = db.get_flow(current_flow_id) if current_flow_id else None
 
-        is_locked = current_flow_def.get(
-            'is_locked') if current_flow_def else False
+        is_locked = current_flow_def.get('is_locked') if current_flow_def else False
 
-        # If not locked (or user is forcing start/restart), switch
         if not is_locked or new_flow_obj['flow_id'] == current_flow_id:
             print(f"Switching context to {new_flow_obj['flow_id']}")
             session = {
@@ -300,18 +262,14 @@ def process_conversation(phone, user_input):
             }
             user_sessions[phone] = session
 
-    # If no session, start default prompt
     if not session['current_flow']:
         return "I'm listening. Text OUCH to start."
 
-    # 2. RUN STEPS LOOP
     response_buffer = []
 
     while True:
-        # Get all steps for this flow
         steps = db.get_steps_for_flow(session['current_flow'])
 
-        # End of Flow Check
         if session['step_order'] >= len(steps):
             session['current_flow'] = None
             break
@@ -322,10 +280,7 @@ def process_conversation(phone, user_input):
         variable = current_step.get('variable')
         guard = current_step.get('guard')
 
-        # --- EXECUTE STEP TYPES ---
-
         if step_type == 'response':
-            # Replace variables {{variable}}
             out_text = content
             if '{' in out_text:
                 for k, v in session['slots'].items():
@@ -339,77 +294,53 @@ def process_conversation(phone, user_input):
             session['step_order'] += 1
 
         elif step_type == 'branch':
-            # Logic: If Condition is Met, Jump. Else, Continue.
             condition_met = check_guard(guard, user_input, session['slots'])
             if condition_met:
                 print(f"Branching to {content}")
                 session['current_flow'] = content
                 session['step_order'] = 0
-                continue  # Restart loop with new flow
+                continue
             else:
                 session['step_order'] += 1
 
         elif step_type == 'validate':
-            # Logic: If Guard Blocks (True), Return Error.
             is_blocked = check_guard(guard, user_input, session['slots'])
             if is_blocked:
-                # Guard FAILED. Stop and ask again.
                 response_buffer.append(f"Please reply with '{content}'.")
-                user_sessions[
-                    phone] = session  # Save state (stay on this step)
+                user_sessions[phone] = session
                 return "\n".join(response_buffer)
 
             session['step_order'] += 1
 
         elif step_type == 'collect':
-            # Logic: Do we have this data in slots?
             if variable in session['slots']:
-                # We have it, move on.
                 session['step_order'] += 1
             else:
-                # We need it.
                 session['pending_slot'] = variable
-                # We do NOT increment step_order. We wait here.
-                # Break the loop to send buffered responses (questions).
                 break
 
-    # Save session
     user_sessions[phone] = session
 
-    # 1. Join the messages into one string
     final_response_text = "\n".join(response_buffer) if response_buffer else ""
 
-    # 2. Log to Airtable
     try:
-        if airtable_api:
-            base = airtable_api.base(AIRTABLE_BASE_ID)
-            base.table('Conversations').create({
-                "phone":
-                phone,
-                "user_message":
-                user_input,
-                "gemini_response":
-                final_response_text,
-                "flow":
-                session.get('current_flow', 'unknown'),
-                "step":
-                session.get('step_order', 0),
-                "conversation_type":
-                "chat_log"
-            })
+        if supabase:
+            supabase.table('conversations').insert({
+                "phone": phone,
+                "user_message": user_input,
+                "gemini_response": final_response_text,
+                "flow": session.get('current_flow', 'unknown'),
+                "step": session.get('step_order', 0),
+                "conversation_type": "chat_log"
+            }).execute()
     except Exception as e:
         print(f"Logging Error: {e}")
 
-    # 3. Return the text
     return final_response_text
-
-
-# --- ROUTES ---
 
 
 @app.route('/sms', methods=['POST'])
 def sms_reply():
-    """Twilio Webhook"""
     if missing_vars:
         return jsonify({
             "error": "Service Config Error",
@@ -421,19 +352,16 @@ def sms_reply():
 
     print(f"SMS From {from_number}: {incoming_msg}")
 
-    # Handle Slot Filling from Previous Turn
     session = user_sessions.get(from_number)
     is_trigger = db.find_trigger_flow(incoming_msg)
 
-    # If waiting for slot AND input is not a new trigger (like HELP), save data
     if session and session.get('pending_slot') and not is_trigger:
         slot_name = session['pending_slot']
         print(f"Filling Slot {slot_name} with '{incoming_msg}'")
         session['slots'][slot_name] = incoming_msg
-        session['pending_slot'] = None  # Clear it
+        session['pending_slot'] = None
         user_sessions[from_number] = session
 
-    # Run Engine
     try:
         response_text = process_conversation(from_number, incoming_msg)
     except Exception as e:
@@ -442,7 +370,6 @@ def sms_reply():
         traceback.print_exc()
         response_text = "System Error. Text STOP."
 
-    # Send Response
     resp = MessagingResponse()
     resp.message(response_text)
     return str(resp)
@@ -452,24 +379,31 @@ def sms_reply():
 def health_check():
     return jsonify({
         "status": "healthy",
-        "service": "mybrain@work SMS service"
+        "service": "mybrain@work SMS service",
+        "database": "Supabase"
     }), 200
 
 
 @app.route('/refresh', methods=['GET'])
 def refresh_logic():
-    """Endpoint to force reload Airtable logic without restart"""
     db.refresh_data()
-    return jsonify({"status": "Logic Refreshed"}), 200
+    return jsonify({"status": "Logic Refreshed from Supabase"}), 200
 
 
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
         "message": "mybrain@work SMS service is running",
-        "webhook_endpoint": "/sms"
+        "webhook_endpoint": "/sms",
+        "database": "Supabase"
     }), 200
 
 
 if __name__ == '__main__':
+    print("=== mybrain@work SMS Service Starting ===")
+    print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
+    print(f"Database: Supabase")
+    print(f"AI Model: Google Gemini 2.0 Flash")
+    if not missing_vars:
+        print("All environment variables validated successfully")
     app.run(host='0.0.0.0', port=8000, debug=False)
