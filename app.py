@@ -260,10 +260,9 @@ class DataManager:
         self.schema_path = schema_path
         self.schema = None
         self.config = {}
-        self.flows = []
-        self.steps = []
-        self.symptoms = []
-        self.slots_def = []
+        self.flows = {}
+        self.symptoms = {}
+        self.slots_def = {}
         self.load_schema()
         self.refresh_data()
 
@@ -297,34 +296,43 @@ class DataManager:
             self.validate_yaml(data)
             
             self.config = data.get('config', {})
-            self.flows = data.get('flows', [])
-            self.steps = sorted(data.get('steps', []), key=lambda s: s.get('step_order', 0))
-            self.symptoms = data.get('symptoms', [])
-            self.slots_def = data.get('slots', [])
+            self.flows = data.get('flows', {})
+            self.symptoms = data.get('symptoms', {})
+            self.slots_def = data.get('slots', {})
             
-            print(f"Loaded {len(self.flows)} flows, {len(self.steps)} steps, {len(self.symptoms)} symptoms, {len(self.slots_def) if isinstance(self.slots_def, list) else len(self.slots_def.keys())} slots.")
+            total_steps = sum(len(f.get('steps', [])) for f in self.flows.values())
+            print(f"Loaded {len(self.flows)} flows, {total_steps} steps, {len(self.symptoms)} symptoms, {len(self.slots_def)} slots.")
         except FileNotFoundError:
             print(f"ERROR: YAML file not found: {self.yaml_path}")
         except Exception as e:
             print(f"CRITICAL ERROR loading YAML data: {e}")
 
     def get_flow(self, flow_id):
-        return next(
-            (f for f in self.flows if f.get('flow_id') == flow_id),
-            None)
+        flow_data = self.flows.get(flow_id)
+        if flow_data:
+            return {'flow_id': flow_id, **flow_data}
+        return None
 
     def get_steps_for_flow(self, flow_id):
-        return [s for s in self.steps if s.get('flow_id') == flow_id]
+        flow = self.flows.get(flow_id, {})
+        return flow.get('steps', [])
 
     def find_trigger_flow(self, user_text):
         text = user_text.upper()
-        for flow in self.flows:
-            triggers = flow.get('triggers', '').upper().split(',')
-            triggers = [t.strip() for t in triggers if t.strip()]
+        for flow_id, flow_data in self.flows.items():
+            triggers = flow_data.get('triggers', [])
+            if isinstance(triggers, str):
+                triggers = [t.strip() for t in triggers.split(',') if t.strip()]
             for trigger in triggers:
-                if trigger in text:
-                    return flow
+                if trigger.upper() in text:
+                    return {'flow_id': flow_id, **flow_data}
         return None
+    
+    def get_symptoms_list(self):
+        return [
+            {'symptom_name': data.get('name', key), 'keywords': data.get('keywords', ''), 'description': data.get('description', '')}
+            for key, data in self.symptoms.items()
+        ]
 
 
 db = DataManager()
@@ -346,7 +354,7 @@ class ActionEngine:
 
             kb_text = "\n".join([
                 f"- {s.get('symptom_name','Pattern')}: {s.get('keywords','')}"
-                for s in db.symptoms
+                for s in db.get_symptoms_list()
             ])
 
             prompt = f"""
@@ -522,10 +530,12 @@ def process_conversation(phone, user_input, is_scheduled=False):
             break
 
         current_step = steps[session['step_order']]
-        step_type = current_step.get('step_type')
+        step_type = current_step.get('type')
         content = current_step.get('content')
         variable = current_step.get('variable')
-        guard = current_step.get('guard')
+        action_name = current_step.get('action_name')
+        condition = current_step.get('condition')
+        target_flow = current_step.get('target_flow')
 
         if step_type == 'response':
             out_text = content
@@ -537,21 +547,21 @@ def process_conversation(phone, user_input, is_scheduled=False):
             session['step_order'] += 1
 
         elif step_type == 'action':
-            ActionEngine.execute(content, session, phone)
+            ActionEngine.execute(action_name, session, phone)
             session['step_order'] += 1
 
         elif step_type == 'branch':
-            condition_met = check_guard(guard, user_input, session['slots'])
+            condition_met = check_guard(condition, user_input, session['slots'])
             if condition_met:
-                print(f"Branching to {content}")
-                session['current_flow'] = content
+                print(f"Branching to {target_flow}")
+                session['current_flow'] = target_flow
                 session['step_order'] = 0
                 continue
             else:
                 session['step_order'] += 1
 
         elif step_type == 'validate':
-            is_blocked = check_guard(guard, user_input, session['slots'])
+            is_blocked = check_guard(condition, user_input, session['slots'])
             if is_blocked:
                 response_buffer.append(f"Please reply with '{content}'.")
                 UserManager.save_session(phone, session)
