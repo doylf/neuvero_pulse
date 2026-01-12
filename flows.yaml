@@ -1,0 +1,97 @@
+flows:
+  - flow_id: ouch_flow
+    flow_name: OUCH Career Coaching
+    triggers: OUCH,ouch
+    is_locked: false
+    description: Main career coaching conversation flow
+
+steps:
+  - flow_id: ouch_flow
+    step_order: 1
+    step_type: response
+    content: "Welcome! I hear you. What is bothering you at work? (Co-worker, Boss, or Self-doubt?)"
+    variable: null
+    guard: null
+
+  - flow_id: ouch_flow
+    step_order: 2
+    step_type: collect
+    content: null
+    variable: stress_trigger
+    guard: null
+
+  - flow_id: ouch_flow
+    step_order: 3
+    step_type: response
+    content: "Tell me more about what happened with your {stress_trigger}."
+    variable: null
+    guard: null
+
+  - flow_id: ouch_flow
+    step_order: 4
+    step_type: collect
+    content: null
+    variable: user_message
+    guard: null
+
+  - flow_id: ouch_flow
+    step_order: 5
+    step_type: action
+    content: analyze_stress_gemini
+    variable: null
+    guard: null
+
+  - flow_id: ouch_flow
+    step_order: 6
+    step_type: branch
+    content: emergency_flow
+    variable: null
+    guard: "ai_analysis.category == EMERGENCY"
+
+  - flow_id: ouch_flow
+    step_order: 7
+    step_type: action
+    content: generate_final_advice
+    variable: null
+    guard: null
+
+  - flow_id: ouch_flow
+    step_order: 8
+    step_type: response
+    content: "{final_advice}"
+    variable: null
+    guard: null
+
+symptoms:
+  - symptom_name: Micromanagement
+    keywords: "boss, control, micromanage, watching, no freedom"
+    description: Feeling controlled or watched too closely by management
+
+  - symptom_name: Toxic Coworker
+    keywords: "coworker, colleague, gossip, backstab, credit"
+    description: Issues with difficult colleagues
+
+  - symptom_name: Imposter Syndrome
+    keywords: "not good enough, fraud, imposter, doubt, unqualified"
+    description: Self-doubt about abilities and qualifications
+
+  - symptom_name: Burnout
+    keywords: "exhausted, tired, overwhelmed, too much, burnout"
+    description: Physical and mental exhaustion from work
+
+slots:
+  - slot_name: stress_trigger
+    slot_type: text
+    prompt_text: "What is bothering you? (Co-worker, Boss, or Self-doubt)"
+
+  - slot_name: user_message
+    slot_type: text
+    prompt_text: "Tell me more about what happened"
+
+  - slot_name: subtype_choice
+    slot_type: text
+    prompt_text: "Which best describes you?"
+
+  - slot_name: win_text
+    slot_type: text
+    prompt_text: "What was your win today?"

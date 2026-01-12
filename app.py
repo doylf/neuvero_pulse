@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import yaml
 from flask import Flask, request, jsonify
 
 from twilio.twiml.messaging_response import MessagingResponse
@@ -56,36 +57,30 @@ else:
 
 class DataManager:
 
-    def __init__(self):
+    def __init__(self, yaml_path='flows.yaml'):
+        self.yaml_path = yaml_path
         self.flows = []
         self.steps = []
         self.symptoms = []
         self.slots_def = []
-        if supabase:
-            self.refresh_data()
+        self.refresh_data()
 
     def refresh_data(self):
-        print("Loading Logic from Supabase...")
+        print(f"Loading Logic from YAML file: {self.yaml_path}")
         try:
-            flows_resp = supabase.table('flows').select('*').execute()
-            self.flows = flows_resp.data if flows_resp.data else []
+            with open(self.yaml_path, 'r') as f:
+                data = yaml.safe_load(f)
             
-            steps_resp = supabase.table('steps').select('*').order('step_order').execute()
-            self.steps = steps_resp.data if steps_resp.data else []
+            self.flows = data.get('flows', [])
+            self.steps = sorted(data.get('steps', []), key=lambda s: s.get('step_order', 0))
+            self.symptoms = data.get('symptoms', [])
+            self.slots_def = data.get('slots', [])
             
-            try:
-                symptoms_resp = supabase.table('symptoms').select('*').execute()
-                self.symptoms = symptoms_resp.data if symptoms_resp.data else []
-            except:
-                print("Warning: Symptoms table not found or empty.")
-                self.symptoms = []
-            
-            slots_resp = supabase.table('slots').select('*').execute()
-            self.slots_def = slots_resp.data if slots_resp.data else []
-            
-            print(f"Loaded {len(self.flows)} flows, {len(self.steps)} steps.")
+            print(f"Loaded {len(self.flows)} flows, {len(self.steps)} steps, {len(self.symptoms)} symptoms, {len(self.slots_def)} slots.")
+        except FileNotFoundError:
+            print(f"ERROR: YAML file not found: {self.yaml_path}")
         except Exception as e:
-            print(f"CRITICAL ERROR loading Supabase data: {e}")
+            print(f"CRITICAL ERROR loading YAML data: {e}")
 
     def get_flow(self, flow_id):
         return next(
@@ -387,7 +382,7 @@ def health_check():
 @app.route('/refresh', methods=['GET'])
 def refresh_logic():
     db.refresh_data()
-    return jsonify({"status": "Logic Refreshed from Supabase"}), 200
+    return jsonify({"status": "Logic Refreshed from YAML"}), 200
 
 
 @app.route('/', methods=['GET'])
