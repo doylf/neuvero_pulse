@@ -116,6 +116,14 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
 ```
 
 ## Recent Changes
+- 2026-01-12: **Added persistent sessions and scheduled flows**
+  - Sessions now persist in Supabase `sessions` table - users can resume flows after app restarts
+  - Added `scheduled_events` table for discontinuous/timed flows
+  - New "schedule" step type with delay_hours, delay_days, resume_time, resume_weekday options
+  - Background scheduler worker checks for due events every 60 seconds
+  - Proper timezone handling using pytz for scheduled delivery times
+  - Added followup_flow definition for check-in messages
+
 - 2026-01-12: **Moved flows/steps/slots to static YAML file**
   - Conversation flow definitions now stored in `flows.yaml` for easy version control
   - Supabase still used for conversation logging only
@@ -127,3 +135,26 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
   - Created PostgreSQL tables: conversations (for logging only)
   - Removed Airtable environment variables
   - Added Supabase environment variables (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+## Supabase Tables
+
+**sessions** - User session persistence:
+- `phone` (VARCHAR PRIMARY KEY)
+- `current_flow` (VARCHAR)
+- `step_order` (INTEGER)
+- `slots` (JSONB)
+- `pending_slot` (VARCHAR)
+- `status` (VARCHAR)
+- `updated_at` (TIMESTAMPTZ)
+
+**scheduled_events** - Timed flow continuations:
+- `id` (SERIAL PRIMARY KEY)
+- `phone` (VARCHAR)
+- `flow_id` (VARCHAR)
+- `resume_step` (INTEGER)
+- `slots` (JSONB)
+- `run_at` (TIMESTAMPTZ)
+- `timezone` (VARCHAR)
+- `status` (VARCHAR)
+- `message_template` (TEXT)
+- `processed_at` (TIMESTAMPTZ)

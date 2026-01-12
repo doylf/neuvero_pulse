@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import threading
 import time
+import pytz
 
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
@@ -114,25 +115,33 @@ class ScheduleManager:
         if not supabase:
             return
         
-        now = datetime.utcnow()
-        run_at = now
+        try:
+            user_tz = pytz.timezone(timezone)
+        except:
+            user_tz = pytz.timezone('America/New_York')
+        
+        now_utc = datetime.now(pytz.UTC)
+        now_local = now_utc.astimezone(user_tz)
         
         if delay_hours:
-            run_at = now + timedelta(hours=delay_hours)
+            run_at_local = now_local + timedelta(hours=delay_hours)
         elif delay_days:
-            run_at = now + timedelta(days=delay_days)
+            run_at_local = now_local + timedelta(days=delay_days)
             if resume_time:
                 hour, minute = map(int, resume_time.split(':'))
-                run_at = run_at.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        
-        if resume_weekday is not None:
-            days_ahead = resume_weekday - now.weekday()
+                run_at_local = run_at_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        elif resume_weekday is not None:
+            days_ahead = resume_weekday - now_local.weekday()
             if days_ahead <= 0:
                 days_ahead += 7
-            run_at = now + timedelta(days=days_ahead)
+            run_at_local = now_local + timedelta(days=days_ahead)
             if resume_time:
                 hour, minute = map(int, resume_time.split(':'))
-                run_at = run_at.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                run_at_local = run_at_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        else:
+            run_at_local = now_local + timedelta(hours=1)
+        
+        run_at_utc = run_at_local.astimezone(pytz.UTC)
         
         try:
             supabase.table('scheduled_events').insert({
@@ -140,12 +149,12 @@ class ScheduleManager:
                 'flow_id': flow_id,
                 'resume_step': resume_step,
                 'slots': slots,
-                'run_at': run_at.isoformat(),
+                'run_at': run_at_utc.isoformat(),
                 'timezone': timezone,
                 'status': 'pending',
                 'message_template': message_template
             }).execute()
-            print(f"Scheduled event for {phone} at {run_at}")
+            print(f"Scheduled event for {phone} at {run_at_utc} UTC (user: {run_at_local})")
         except Exception as e:
             print(f"Error scheduling event: {e}")
 
@@ -545,7 +554,6 @@ def process_scheduled_events():
 
 
 def scheduler_worker():
-    print("Scheduler worker started")
     while True:
         try:
             process_scheduled_events()
@@ -622,6 +630,21 @@ def home():
     }), 200
 
 
+scheduler_started = False
+
+def start_scheduler():
+    global scheduler_started
+    if scheduler_started:
+        return
+    scheduler_started = True
+    scheduler_thread = threading.Thread(target=scheduler_worker, daemon=True)
+    scheduler_thread.start()
+    print("Scheduler worker started")
+
+
+start_scheduler()
+
+
 if __name__ == '__main__':
     print("=== mybrain@work SMS Service Starting ===")
     print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
@@ -630,8 +653,5 @@ if __name__ == '__main__':
     print("Features: Persistent Sessions, Scheduled Flows")
     if not missing_vars:
         print("All environment variables validated successfully")
-    
-    scheduler_thread = threading.Thread(target=scheduler_worker, daemon=True)
-    scheduler_thread.start()
     
     app.run(host='0.0.0.0', port=8000, debug=False)
