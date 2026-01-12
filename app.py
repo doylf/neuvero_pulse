@@ -13,6 +13,7 @@ from twilio.rest import Client
 
 from supabase import create_client, Client as SupabaseClient
 import google.generativeai as genai
+from system_prompt import SYSTEM_PROMPT
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get(
@@ -48,7 +49,11 @@ else:
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    gemini_model = genai.GenerativeModel(
+        'gemini-2.0-flash-exp',
+        system_instruction=SYSTEM_PROMPT
+    )
+    print("Gemini AI connected with Neuvero Pulse system prompt.")
 else:
     gemini_model = None
     print("Warning: Gemini AI not connected.")
