@@ -518,8 +518,15 @@ def process_conversation(phone, user_input, is_scheduled=False):
         return "I'm listening. Text OUCH to start."
 
     response_buffer = []
+    max_loops = 50
+    loop_count = 0
 
     while True:
+        if loop_count >= max_loops:
+            print("CRITICAL: Infinite loop detected in flow logic")
+            break
+        loop_count += 1
+        
         steps = db.get_steps_for_flow(session['current_flow'])
 
         if session['step_order'] >= len(steps):
