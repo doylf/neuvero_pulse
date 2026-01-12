@@ -116,10 +116,14 @@ gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
 ```
 
 ## Recent Changes
+- 2026-01-12: **Moved flows/steps/slots to static YAML file**
+  - Conversation flow definitions now stored in `flows.yaml` for easy version control
+  - Supabase still used for conversation logging only
+  - Added PyYAML dependency
+  - Use `/refresh` endpoint to reload YAML without restarting
+
 - 2026-01-12: **Migrated from Airtable to Supabase**
   - Replaced pyairtable with supabase-py client
-  - Created PostgreSQL tables: flows, steps, symptoms, slots, conversations
-  - Updated all data access methods to use Supabase queries
-  - Added schema file `supabase_schema.sql` for easy setup
-  - Removed Airtable environment variables (AIRTABLE_API_KEY, AIRTABLE_BASE_ID)
+  - Created PostgreSQL tables: conversations (for logging only)
+  - Removed Airtable environment variables
   - Added Supabase environment variables (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)

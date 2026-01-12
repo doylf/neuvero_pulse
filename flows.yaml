@@ -5,6 +5,12 @@ flows:
     is_locked: false
     description: Main career coaching conversation flow
 
+  - flow_id: emergency_flow
+    flow_name: Emergency Response
+    triggers: ""
+    is_locked: true
+    description: Emergency response flow for crisis situations
+
 steps:
   - flow_id: ouch_flow
     step_order: 1
@@ -59,6 +65,20 @@ steps:
     step_order: 8
     step_type: response
     content: "{final_advice}"
+    variable: null
+    guard: null
+
+  - flow_id: emergency_flow
+    step_order: 1
+    step_type: response
+    content: "That sounds urgent. Please text 988 for free crisis support now. You're not alone."
+    variable: null
+    guard: null
+
+  - flow_id: emergency_flow
+    step_order: 2
+    step_type: action
+    content: alert_admin
     variable: null
     guard: null
 
