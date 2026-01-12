@@ -1,8 +1,6 @@
 import os
 import sys
-import uuid
 import json
-from datetime import datetime
 from flask import Flask, request, jsonify
 
 # Twilio
@@ -24,7 +22,6 @@ TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY', '')
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', '')
-AIRTABLE_TABLE_NAME = os.environ.get('AIRTABLE_TABLE_NAME', 'Conversations')
 
 # Safety Check
 required_env_vars = {
@@ -130,6 +127,8 @@ class ActionEngine:
         print(f"Executing Action: {action_name}")
         slots = session['slots']
 
+        action_name = action_name.strip()
+
         if action_name == 'analyze_stress_gemini':
             user_message = slots.get('user_message', '')
             trigger = slots.get('stress_trigger', 'Unknown')
@@ -199,18 +198,37 @@ class ActionEngine:
             try:
                 if airtable_api:
                     base = airtable_api.base(AIRTABLE_BASE_ID)
-                    base.table(AIRTABLE_TABLE_NAME).create({
+                    base.table('Conversations').create({
                         "phone":
                         user_phone,
                         "user_message":
                         slots.get('user_message'),
-                        "timestamp":
-                        datetime.now().isoformat(),
                         "gemini_response":
                         slots.get('final_advice')
                     })
             except Exception as e:
                 print(f"Logging Error: {e}")
+            return None
+
+        elif action_name == 'save_win':
+            win_text = slots.get('win_text')
+            try:
+                if airtable_api:
+                    base = airtable_api.base(AIRTABLE_BASE_ID)
+                    # We save to the 'Conversations' table, populating the 'win' column
+                    base.table('Conversations').create({
+                        "phone":
+                        user_phone,
+                        "win":
+                        win_text,
+                        "conversation_type":
+                        "win_submission"
+                    })
+                    print(f"Successfully saved win to Airtable: {win_text}")
+                else:
+                    print("Error: Airtable API not connected.")
+            except Exception as e:
+                print(f"Error saving win to Airtable: {e}")
             return None
 
         elif action_name == 'alert_admin':
@@ -358,10 +376,32 @@ def process_conversation(phone, user_input):
     # Save session
     user_sessions[phone] = session
 
-    if not response_buffer:
-        return ""
+    # 1. Join the messages into one string
+    final_response_text = "\n".join(response_buffer) if response_buffer else ""
 
-    return "\n".join(response_buffer)
+    # 2. Log to Airtable
+    try:
+        if airtable_api:
+            base = airtable_api.base(AIRTABLE_BASE_ID)
+            base.table('Conversations').create({
+                "phone":
+                phone,
+                "user_message":
+                user_input,
+                "gemini_response":
+                final_response_text,
+                "flow":
+                session.get('current_flow', 'unknown'),
+                "step":
+                session.get('step_order', 0),
+                "conversation_type":
+                "chat_log"
+            })
+    except Exception as e:
+        print(f"Logging Error: {e}")
+
+    # 3. Return the text
+    return final_response_text
 
 
 # --- ROUTES ---

@@ -41,169 +41,322 @@ def create_table(table_schema):
 
 # --- SCHEMA DEFINITIONS (DDL EQUIVALENT) ---
 
-# 1. Flows Table
-# Acts as the "Menu" for the bot.
+# 1. Flows
 schema_flows = {
     "name":
     "Flows",
-    "description":
-    "High-level conversation capabilities.",
-    "fields": [
-        # Primary Key
-        {
-            "name": "flow_id",
-            "type": "singleLineText",
-            "description": "Unique ID for the flow (e.g., flow_stress_relief)"
-        },
-        # Columns
-        {
-            "name":
-            "description",
-            "type":
-            "multilineText",
-            "description":
-            "Description for the AI to understand when to select this flow"
-        },
-        {
-            "name": "triggers",
-            "type": "singleLineText",
-            "description": "Comma-separated keywords (e.g., OUCH, HELP)"
-        },
-        {
-            "name": "is_locked",
-            "type": "checkbox",
-            "options": {
-                "icon": "check",  # FIXED: Changed 'lock' to 'check' (standard)
-                "color":
-                "redBright"  # This might work, if not, remove 'options' entirely
-            }
-        },
-        {
-            "name": "guard_condition",
-            "type": "singleLineText",
-            "description":
-            "Python-like condition string (e.g., user.is_premium)"
+    "fields": [{
+        "name": "flow_id",
+        "type": "singleLineText",
+        "primary": True
+    }, {
+        "name": "description",
+        "type": "multilineText"
+    }, {
+        "name": "triggers",
+        "type": "multilineText"
+    }, {
+        "name": "flow_guard",
+        "type": "multilineText"
+    }, {
+        "name": "priority",
+        "type": "number",
+        "options": {
+            "precision": 0
         }
-    ]
+    }, {
+        "name": "is_active",
+        "type": "checkbox"
+    }, {
+        "name": "persisted_slots",
+        "type": "multilineText"
+    }]
 }
 
-# 2. Steps Table
-# The linear logic script.
+# 2. Steps
 schema_steps = {
     "name":
     "Steps",
-    "description":
-    "The logic and script for every flow.",
-    "fields": [
-        # Primary Key
-        {
-            "name": "step_uid",
-            "type": "singleLineText",
-            "description": "Unique Step ID (e.g., flow_stress_1)"
-        },
-        # Foreign Key Reference (Loose Text Link for simplicity)
-        {
-            "name": "flow_id",
-            "type": "singleLineText"
-        },
-        {
-            "name": "step_order",
-            "type": "number",
-            "options": {
-                "precision": 0
-            }
-        },
-        {
-            "name": "step_type",
-            "type": "singleSelect",
-            "options": {
-                "choices": [
-                    # FIXED: Used valid Airtable color enums
-                    {
-                        "name": "response",
-                        "color": "blueLight2"
-                    },
-                    {
-                        "name": "collect",
-                        "color": "yellowLight2"
-                    },
-                    {
-                        "name": "action",
-                        "color": "redLight2"
-                    },
-                    {
-                        "name": "branch",
-                        "color": "orangeLight2"
-                    },
-                    {
-                        "name": "validate",
-                        "color": "purpleLight2"
-                    }
-                ]
-            }
-        },
-        {
-            "name": "content",
-            "type": "multilineText",
-            "description": "The text to say, or function to call"
-        },
-        {
-            "name": "variable",
-            "type": "singleLineText",
-            "description": "Variable name to store result in (e.g., user_name)"
-        },
-        {
-            "name": "guard",
-            "type": "singleLineText",
-            "description":
-            "Condition required to proceed (e.g., input == 'YES')"
+    "fields": [{
+        "name": "step_id",
+        "type": "singleLineText",
+        "primary": True
+    }, {
+        "name": "flow_reference",
+        "type": "singleLineText"
+    }, {
+        "name": "step_order",
+        "type": "number",
+        "options": {
+            "precision": 0
         }
-    ]
+    }, {
+        "name": "step_type",
+        "type": "singleSelect",
+        "options": {
+            "choices": [{
+                "name": "collect"
+            }, {
+                "name": "action"
+            }, {
+                "name": "set_slots"
+            }, {
+                "name": "branch"
+            }, {
+                "name": "subflow"
+            }, {
+                "name": "pattern"
+            }, {
+                "name": "validate"
+            }, {
+                "name": "response"
+            }]
+        }
+    }, {
+        "name": "content",
+        "type": "multilineText"
+    }, {
+        "name": "slot_name",
+        "type": "singleLineText"
+    }, {
+        "name": "next_step_reference",
+        "type": "singleLineText"
+    }, {
+        "name": "branch_conditions",
+        "type": "multilineText"
+    }, {
+        "name": "guard_condition",
+        "type": "multilineText"
+    }, {
+        "name": "step_description",
+        "type": "multilineText"
+    }]
 }
 
-# 3. Slots Table
-# The memory definitions.
+# 3. Slots
 schema_slots = {
     "name":
     "Slots",
-    "description":
-    "Memory variables definitions.",
-    "fields": [
-        {
-            "name": "slot_name",
-            "type": "singleLineText",
-            "description": "Name of the variable"
-        },
-        {
-            "name": "type",
-            "type": "singleSelect",
-            "options": {
-                "choices": [
-                    # FIXED: Used valid Airtable color enums
-                    {
-                        "name": "text",
-                        "color": "grayLight2"
-                    },
-                    {
-                        "name": "boolean",
-                        "color": "blueLight2"
-                    },
-                    {
-                        "name": "categorical",
-                        "color": "purpleLight2"
-                    },
-                    {
-                        "name": "json",
-                        "color": "greenLight2"
-                    }
-                ]
-            }
-        },
-        {
-            "name": "description",
-            "type": "multilineText"
+    "fields": [{
+        "name": "slot_name",
+        "type": "singleLineText",
+        "primary": True
+    }, {
+        "name": "type",
+        "type": "singleSelect",
+        "options": {
+            "choices": [{
+                "name": "text"
+            }, {
+                "name": "boolean"
+            }, {
+                "name": "categorical"
+            }, {
+                "name": "number"
+            }, {
+                "name": "list"
+            }, {
+                "name": "json"
+            }]
         }
-    ]
+    }, {
+        "name": "description",
+        "type": "multilineText"
+    }, {
+        "name": "initial_value",
+        "type": "multilineText"
+    }, {
+        "name": "persist_across_flows",
+        "type": "checkbox"
+    }, {
+        "name": "mapping_strategy",
+        "type": "singleSelect",
+        "options": {
+            "choices": [{
+                "name": "from_llm"
+            }, {
+                "name": "from_entity"
+            }, {
+                "name": "from_intent"
+            }, {
+                "name": "from_trigger"
+            }, {
+                "name": "custom_action"
+            }]
+        }
+    }, {
+        "name": "validation_rule",
+        "type": "multilineText"
+    }]
+}
+
+# 4. Users
+schema_users = {
+    "name":
+    "Users",
+    "fields": [{
+        "name": "User_ID",
+        "type": "singleLineText",
+        "primary": True
+    }, {
+        "name": "Phone",
+        "type": "phoneNumber"
+    }, {
+        "name": "Email",
+        "type": "email"
+    }, {
+        "name": "Status",
+        "type": "singleSelect",
+        "options": {
+            "choices": [{
+                "name": "Active"
+            }, {
+                "name": "Paused"
+            }, {
+                "name": "Banned"
+            }, {
+                "name": "Anonymous"
+            }, {
+                "name": "Paid"
+            }]
+        }
+    }, {
+        "name": "organization_reference",
+        "type": "singleLineText"
+    }, {
+        "name": "current_flow_reference",
+        "type": "singleLineText"
+    }, {
+        "name": "Onboarding_Date",
+        "type": "dateTime"
+    }, {
+        "name": "Last_Active",
+        "type": "dateTime"
+    }]
+}
+
+# 5. Conversations
+schema_conversations = {
+    "name":
+    "Conversations",
+    "fields": [{
+        "name": "Log_ID",
+        "type": "formula",
+        "formula": "RECORD_ID()",
+        "primary": True
+    }, {
+        "name": "user_reference",
+        "type": "singleLineText"
+    }, {
+        "name": "Channel_ID",
+        "type": "singleLineText"
+    }, {
+        "name": "User_Message",
+        "type": "multilineText"
+    }, {
+        "name": "Bot_Response",
+        "type": "multilineText"
+    }, {
+        "name": "active_flow_reference",
+        "type": "singleLineText"
+    }, {
+        "name": "step_reference",
+        "type": "singleLineText"
+    }, {
+        "name": "Commands",
+        "type": "multilineText"
+    }]
+}
+
+# 6. UserContext
+schema_user_context = {
+    "name":
+    "UserContext",
+    "fields": [{
+        "name": "Record_ID",
+        "type": "formula",
+        "formula":
+        "CONCATENATE({owner_reference}, ' - ', Subject, ' - ', Predicate)",
+        "primary": True
+    }, {
+        "name": "owner_reference",
+        "type": "singleLineText"
+    }, {
+        "name": "Subject",
+        "type": "singleLineText"
+    }, {
+        "name": "Predicate",
+        "type": "singleLineText"
+    }, {
+        "name": "Object",
+        "type": "singleLineText"
+    }, {
+        "name": "Is_New_Entity",
+        "type": "checkbox"
+    }]
+}
+
+# 7. Events
+schema_events = {
+    "name":
+    "Events",
+    "fields": [{
+        "name": "Event_ID",
+        "type": "formula",
+        "formula": "RECORD_ID()",
+        "primary": True
+    }, {
+        "name": "user_reference",
+        "type": "singleLineText"
+    }, {
+        "name": "Content",
+        "type": "multilineText"
+    }, {
+        "name": "Category",
+        "type": "singleSelect",
+        "options": {
+            "choices": [{
+                "name": "Win"
+            }, {
+                "name": "Gratitude"
+            }, {
+                "name": "Crisis Alert"
+            }, {
+                "name": "Feedback"
+            }, {
+                "name": "System Flag"
+            }]
+        }
+    }, {
+        "name": "conversation_reference",
+        "type": "singleLineText"
+    }]
+}
+
+# 8. Organizations
+schema_organizations = {
+    "name":
+    "Organizations",
+    "fields": [{
+        "name": "Org_Name",
+        "type": "singleLineText",
+        "primary": True
+    }, {
+        "name": "Plan_Type",
+        "type": "singleSelect",
+        "options": {
+            "choices": [{
+                "name": "Free"
+            }, {
+                "name": "Pro"
+            }, {
+                "name": "Enterprise"
+            }]
+        }
+    }, {
+        "name": "employees_reference",
+        "type": "singleLineText"
+    }]
 }
 
 # --- EXECUTION ---
@@ -212,7 +365,12 @@ if __name__ == "__main__":
 
     # Create tables in order
     create_table(schema_flows)
-    create_table(schema_steps)
-    create_table(schema_slots)
+    #    create_table(schema_steps)
+    #    create_table(schema_slots)
+    #    create_table(schema_users)
+    #    create_table(schema_user_context)
+    #    create_table(schema_organizations)
+    #    create_table(schema_user_events)
+    #    create_table(schema_conversations)
 
     print("\n✨ Operations complete. Check your Airtable base.")
