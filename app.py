@@ -63,9 +63,6 @@ twilio_client = None
 if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-in_memory_slots = {}
-
-
 class UserManager:
     
     @staticmethod
@@ -79,7 +76,8 @@ class UserManager:
             
             new_user = supabase.table('users').insert({
                 'phone': phone,
-                'status': 'Active'
+                'status': 'Active',
+                'slots': {}
             }).execute()
             if new_user.data:
                 return new_user.data[0]
@@ -93,7 +91,7 @@ class UserManager:
         if not user:
             return None
         
-        slots = in_memory_slots.get(phone, {})
+        slots = user.get('slots') or {}
         
         return {
             'user_id': user.get('id'),
@@ -110,18 +108,18 @@ class UserManager:
             return
         try:
             step_id = str(session.get('step_order', 0))
-            supabase.table('users').update({
-                'current_flow': session.get('current_flow'),
-                'current_step_id': step_id,
-                'last_active': datetime.utcnow().isoformat()
-            }).eq('phone', phone).execute()
-            
             slots = session.get('slots', {})
             if session.get('pending_slot'):
                 slots['_pending_slot'] = session['pending_slot']
             elif '_pending_slot' in slots:
                 del slots['_pending_slot']
-            in_memory_slots[phone] = slots
+            
+            supabase.table('users').update({
+                'current_flow': session.get('current_flow'),
+                'current_step_id': step_id,
+                'slots': slots,
+                'last_active': datetime.utcnow().isoformat()
+            }).eq('phone', phone).execute()
             
         except Exception as e:
             print(f"Error saving session: {e}")
@@ -133,10 +131,9 @@ class UserManager:
         try:
             supabase.table('users').update({
                 'current_flow': None,
-                'current_step_id': None
+                'current_step_id': None,
+                'slots': {}
             }).eq('phone', phone).execute()
-            if phone in in_memory_slots:
-                del in_memory_slots[phone]
         except Exception as e:
             print(f"Error clearing session: {e}")
 
