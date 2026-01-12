@@ -57,43 +57,66 @@ twilio_client = None
 if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
+in_memory_slots = {}
 
-class SessionManager:
+
+class UserManager:
     
     @staticmethod
-    def get_session(phone):
+    def get_or_create_user(phone):
         if not supabase:
             return None
         try:
-            result = supabase.table('sessions').select('*').eq('phone', phone).execute()
+            result = supabase.table('users').select('*').eq('phone', phone).execute()
             if result.data and len(result.data) > 0:
-                row = result.data[0]
-                return {
-                    'current_flow': row.get('current_flow'),
-                    'step_order': row.get('step_order', 0),
-                    'slots': row.get('slots', {}),
-                    'pending_slot': row.get('pending_slot'),
-                    'timezone': row.get('timezone', 'America/New_York')
-                }
+                return result.data[0]
+            
+            new_user = supabase.table('users').insert({
+                'phone': phone,
+                'status': 'Active'
+            }).execute()
+            if new_user.data:
+                return new_user.data[0]
         except Exception as e:
-            print(f"Error getting session: {e}")
+            print(f"Error getting/creating user: {e}")
         return None
+
+    @staticmethod
+    def get_session(phone):
+        user = UserManager.get_or_create_user(phone)
+        if not user:
+            return None
+        
+        slots = in_memory_slots.get(phone, {})
+        
+        return {
+            'user_id': user.get('id'),
+            'current_flow': user.get('current_flow'),
+            'step_order': int(user.get('current_step_id', '0') or '0'),
+            'slots': slots,
+            'pending_slot': slots.get('_pending_slot'),
+            'timezone': 'America/New_York'
+        }
 
     @staticmethod
     def save_session(phone, session):
         if not supabase:
             return
         try:
-            data = {
-                'phone': phone,
+            step_id = str(session.get('step_order', 0))
+            supabase.table('users').update({
                 'current_flow': session.get('current_flow'),
-                'step_order': session.get('step_order', 0),
-                'slots': session.get('slots', {}),
-                'pending_slot': session.get('pending_slot'),
-                'status': 'active',
-                'updated_at': datetime.utcnow().isoformat()
-            }
-            supabase.table('sessions').upsert(data, on_conflict='phone').execute()
+                'current_step_id': step_id,
+                'last_active': datetime.utcnow().isoformat()
+            }).eq('phone', phone).execute()
+            
+            slots = session.get('slots', {})
+            if session.get('pending_slot'):
+                slots['_pending_slot'] = session['pending_slot']
+            elif '_pending_slot' in slots:
+                del slots['_pending_slot']
+            in_memory_slots[phone] = slots
+            
         except Exception as e:
             print(f"Error saving session: {e}")
 
@@ -102,7 +125,12 @@ class SessionManager:
         if not supabase:
             return
         try:
-            supabase.table('sessions').delete().eq('phone', phone).execute()
+            supabase.table('users').update({
+                'current_flow': None,
+                'current_step_id': None
+            }).eq('phone', phone).execute()
+            if phone in in_memory_slots:
+                del in_memory_slots[phone]
         except Exception as e:
             print(f"Error clearing session: {e}")
 
@@ -110,9 +138,9 @@ class SessionManager:
 class ScheduleManager:
     
     @staticmethod
-    def schedule_step(phone, flow_id, resume_step, slots, delay_hours=None, delay_days=None, 
-                      resume_time=None, resume_weekday=None, message_template=None, timezone='America/New_York'):
-        if not supabase:
+    def schedule_step(user_id, flow_id, step_id, timezone='America/New_York',
+                      delay_hours=None, delay_days=None, resume_time=None, resume_weekday=None):
+        if not supabase or not user_id:
             return
         
         try:
@@ -144,47 +172,79 @@ class ScheduleManager:
         run_at_utc = run_at_local.astimezone(pytz.UTC)
         
         try:
-            supabase.table('scheduled_events').insert({
-                'phone': phone,
+            supabase.table('scheduled_tasks').insert({
+                'user_id': user_id,
                 'flow_id': flow_id,
-                'resume_step': resume_step,
-                'slots': slots,
-                'run_at': run_at_utc.isoformat(),
-                'timezone': timezone,
-                'status': 'pending',
-                'message_template': message_template
+                'step_id': step_id,
+                'execute_at': run_at_utc.isoformat(),
+                'status': 'Pending'
             }).execute()
-            print(f"Scheduled event for {phone} at {run_at_utc} UTC (user: {run_at_local})")
+            print(f"Scheduled task for user {user_id} at {run_at_utc} UTC")
         except Exception as e:
-            print(f"Error scheduling event: {e}")
+            print(f"Error scheduling task: {e}")
 
     @staticmethod
-    def get_due_events():
+    def get_due_tasks():
         if not supabase:
             return []
         try:
             now = datetime.utcnow().isoformat()
-            result = supabase.table('scheduled_events')\
-                .select('*')\
-                .eq('status', 'pending')\
-                .lte('run_at', now)\
+            result = supabase.table('scheduled_tasks')\
+                .select('*, users(phone)')\
+                .eq('status', 'Pending')\
+                .lte('execute_at', now)\
                 .execute()
             return result.data if result.data else []
         except Exception as e:
-            print(f"Error getting due events: {e}")
+            print(f"Error getting due tasks: {e}")
             return []
 
     @staticmethod
-    def mark_processed(event_id):
+    def mark_completed(task_id):
         if not supabase:
             return
         try:
-            supabase.table('scheduled_events').update({
-                'status': 'processed',
-                'processed_at': datetime.utcnow().isoformat()
-            }).eq('id', event_id).execute()
+            supabase.table('scheduled_tasks').update({
+                'status': 'Completed'
+            }).eq('id', task_id).execute()
         except Exception as e:
-            print(f"Error marking event processed: {e}")
+            print(f"Error marking task completed: {e}")
+
+
+class ConversationLogger:
+    
+    @staticmethod
+    def log(user_id, channel_id, user_message, gemini_response, flow_context=None, step_context=None):
+        if not supabase or not user_id:
+            return None
+        try:
+            result = supabase.table('conversations').insert({
+                'user_id': user_id,
+                'channel_id': channel_id,
+                'flow_context': flow_context,
+                'step_context': step_context,
+                'user_message': user_message,
+                'gemini_response': gemini_response
+            }).execute()
+            if result.data:
+                return result.data[0].get('id')
+        except Exception as e:
+            print(f"Logging Error: {e}")
+        return None
+
+    @staticmethod
+    def log_event(user_id, category, content, conversation_ref=None):
+        if not supabase or not user_id:
+            return
+        try:
+            supabase.table('events').insert({
+                'user_id': user_id,
+                'category': category,
+                'content': content,
+                'conversation_ref': conversation_ref
+            }).execute()
+        except Exception as e:
+            print(f"Event logging error: {e}")
 
 
 class DataManager:
@@ -242,6 +302,7 @@ class ActionEngine:
     def execute(action_name, session, user_phone):
         print(f"Executing Action: {action_name}")
         slots = session['slots']
+        user_id = session.get('user_id')
 
         action_name = action_name.strip()
 
@@ -308,35 +369,40 @@ class ActionEngine:
             return None
 
         elif action_name == 'log_to_supabase':
-            try:
-                if supabase:
-                    supabase.table('conversations').insert({
-                        "phone": user_phone,
-                        "user_message": slots.get('user_message'),
-                        "gemini_response": slots.get('final_advice')
-                    }).execute()
-            except Exception as e:
-                print(f"Logging Error: {e}")
+            ConversationLogger.log(
+                user_id=user_id,
+                channel_id=user_phone,
+                user_message=slots.get('user_message'),
+                gemini_response=slots.get('final_advice'),
+                flow_context=session.get('current_flow'),
+                step_context=str(session.get('step_order', 0))
+            )
             return None
 
         elif action_name == 'save_win':
             win_text = slots.get('win_text')
-            try:
-                if supabase:
-                    supabase.table('conversations').insert({
-                        "phone": user_phone,
-                        "win": win_text,
-                        "conversation_type": "win_submission"
-                    }).execute()
-                    print(f"Successfully saved win to Supabase: {win_text}")
-                else:
-                    print("Error: Supabase not connected.")
-            except Exception as e:
-                print(f"Error saving win to Supabase: {e}")
+            conv_id = ConversationLogger.log(
+                user_id=user_id,
+                channel_id=user_phone,
+                user_message=win_text,
+                gemini_response=None,
+                flow_context='win_submission'
+            )
+            ConversationLogger.log_event(
+                user_id=user_id,
+                category='Win',
+                content=win_text,
+                conversation_ref=conv_id
+            )
             return None
 
         elif action_name == 'alert_admin':
             print("ALERT: Admin notified of emergency.")
+            ConversationLogger.log_event(
+                user_id=user_id,
+                category='Crisis',
+                content=f"Emergency detected for user {user_phone}"
+            )
             return None
 
         elif action_name == 'complete_onboarding':
@@ -377,9 +443,10 @@ def send_sms(to_phone, message):
 
 
 def process_conversation(phone, user_input, is_scheduled=False):
-    session = SessionManager.get_session(phone)
+    session = UserManager.get_session(phone)
     if not session:
         session = {
+            'user_id': None,
             'current_flow': None,
             'step_order': 0,
             'slots': {},
@@ -399,6 +466,7 @@ def process_conversation(phone, user_input, is_scheduled=False):
             if not is_locked or new_flow_obj['flow_id'] == current_flow_id:
                 print(f"Switching context to {new_flow_obj['flow_id']}")
                 session = {
+                    'user_id': session.get('user_id'),
                     'current_flow': new_flow_obj['flow_id'],
                     'step_order': 0,
                     'slots': {},
@@ -407,7 +475,7 @@ def process_conversation(phone, user_input, is_scheduled=False):
                 }
 
     if not session['current_flow']:
-        SessionManager.save_session(phone, session)
+        UserManager.save_session(phone, session)
         return "I'm listening. Text OUCH to start."
 
     response_buffer = []
@@ -452,7 +520,7 @@ def process_conversation(phone, user_input, is_scheduled=False):
             is_blocked = check_guard(guard, user_input, session['slots'])
             if is_blocked:
                 response_buffer.append(f"Please reply with '{content}'.")
-                SessionManager.save_session(phone, session)
+                UserManager.save_session(phone, session)
                 return "\n".join(response_buffer)
             session['step_order'] += 1
 
@@ -468,19 +536,18 @@ def process_conversation(phone, user_input, is_scheduled=False):
             delay_days = current_step.get('delay_days')
             resume_time = current_step.get('resume_time')
             resume_weekday = current_step.get('resume_weekday')
-            message_template = current_step.get('message_template')
+            
+            next_step = str(session['step_order'] + 1)
             
             ScheduleManager.schedule_step(
-                phone=phone,
+                user_id=session.get('user_id'),
                 flow_id=session['current_flow'],
-                resume_step=session['step_order'] + 1,
-                slots=session['slots'],
+                step_id=next_step,
+                timezone=session.get('timezone', 'America/New_York'),
                 delay_hours=delay_hours,
                 delay_days=delay_days,
                 resume_time=resume_time,
-                resume_weekday=resume_weekday,
-                message_template=message_template,
-                timezone=session.get('timezone', 'America/New_York')
+                resume_weekday=resume_weekday
             )
             
             if content:
@@ -495,68 +562,59 @@ def process_conversation(phone, user_input, is_scheduled=False):
             session['current_flow'] = None
             break
 
-    SessionManager.save_session(phone, session)
+    UserManager.save_session(phone, session)
 
     final_response_text = "\n".join(response_buffer) if response_buffer else ""
 
-    try:
-        if supabase and final_response_text:
-            supabase.table('conversations').insert({
-                "phone": phone,
-                "user_message": user_input,
-                "gemini_response": final_response_text,
-                "flow": session.get('current_flow', 'unknown'),
-                "step": session.get('step_order', 0),
-                "conversation_type": "chat_log"
-            }).execute()
-    except Exception as e:
-        print(f"Logging Error: {e}")
+    if final_response_text:
+        ConversationLogger.log(
+            user_id=session.get('user_id'),
+            channel_id=phone,
+            user_message=user_input,
+            gemini_response=final_response_text,
+            flow_context=session.get('current_flow'),
+            step_context=str(session.get('step_order', 0))
+        )
 
     return final_response_text
 
 
-def process_scheduled_events():
-    events = ScheduleManager.get_due_events()
-    for event in events:
+def process_scheduled_tasks():
+    tasks = ScheduleManager.get_due_tasks()
+    for task in tasks:
         try:
-            phone = event['phone']
-            flow_id = event['flow_id']
-            resume_step = event['resume_step']
-            slots = event.get('slots', {})
-            message_template = event.get('message_template')
+            user_data = task.get('users', {})
+            phone = user_data.get('phone') if user_data else None
             
-            session = {
-                'current_flow': flow_id,
-                'step_order': resume_step,
-                'slots': slots,
-                'pending_slot': None,
-                'timezone': event.get('timezone', 'America/New_York')
-            }
-            SessionManager.save_session(phone, session)
+            if not phone:
+                print(f"No phone for task {task['id']}, skipping")
+                ScheduleManager.mark_completed(task['id'])
+                continue
             
-            if message_template:
-                out_text = message_template
-                if '{' in out_text:
-                    for k, v in slots.items():
-                        val = str(v) if v is not None else ""
-                        out_text = out_text.replace(f"{{{k}}}", val)
-                send_sms(phone, out_text)
-            else:
-                response = process_conversation(phone, '', is_scheduled=True)
-                if response:
-                    send_sms(phone, response)
+            flow_id = task['flow_id']
+            step_id = task['step_id']
             
-            ScheduleManager.mark_processed(event['id'])
-            print(f"Processed scheduled event {event['id']} for {phone}")
+            session = UserManager.get_session(phone)
+            if session:
+                session['current_flow'] = flow_id
+                session['step_order'] = int(step_id)
+                UserManager.save_session(phone, session)
+            
+            response = process_conversation(phone, '', is_scheduled=True)
+            if response:
+                send_sms(phone, response)
+            
+            ScheduleManager.mark_completed(task['id'])
+            print(f"Processed scheduled task {task['id']} for {phone}")
             
         except Exception as e:
-            print(f"Error processing scheduled event: {e}")
+            print(f"Error processing scheduled task: {e}")
 
 
 def scheduler_worker():
     while True:
         try:
-            process_scheduled_events()
+            process_scheduled_tasks()
         except Exception as e:
             print(f"Scheduler error: {e}")
         time.sleep(60)
@@ -575,7 +633,7 @@ def sms_reply():
 
     print(f"SMS From {from_number}: {incoming_msg}")
 
-    session = SessionManager.get_session(from_number)
+    session = UserManager.get_session(from_number)
     is_trigger = db.find_trigger_flow(incoming_msg)
 
     if session and session.get('pending_slot') and not is_trigger:
@@ -583,7 +641,7 @@ def sms_reply():
         print(f"Filling Slot {slot_name} with '{incoming_msg}'")
         session['slots'][slot_name] = incoming_msg
         session['pending_slot'] = None
-        SessionManager.save_session(from_number, session)
+        UserManager.save_session(from_number, session)
 
     try:
         response_text = process_conversation(from_number, incoming_msg)
@@ -604,7 +662,7 @@ def health_check():
         "status": "healthy",
         "service": "mybrain@work SMS service",
         "database": "Supabase",
-        "features": ["persistent_sessions", "scheduled_flows"]
+        "features": ["persistent_sessions", "scheduled_flows", "events_logging"]
     }), 200
 
 
@@ -616,8 +674,8 @@ def refresh_logic():
 
 @app.route('/process-scheduled', methods=['POST'])
 def trigger_scheduled():
-    process_scheduled_events()
-    return jsonify({"status": "Processed scheduled events"}), 200
+    process_scheduled_tasks()
+    return jsonify({"status": "Processed scheduled tasks"}), 200
 
 
 @app.route('/', methods=['GET'])
@@ -626,7 +684,7 @@ def home():
         "message": "mybrain@work SMS service is running",
         "webhook_endpoint": "/sms",
         "database": "Supabase",
-        "features": ["persistent_sessions", "scheduled_flows"]
+        "features": ["persistent_sessions", "scheduled_flows", "events_logging"]
     }), 200
 
 
@@ -650,7 +708,7 @@ if __name__ == '__main__':
     print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
     print(f"Database: Supabase")
     print(f"AI Model: Google Gemini 2.0 Flash")
-    print("Features: Persistent Sessions, Scheduled Flows")
+    print("Features: Persistent Sessions, Scheduled Flows, Events Logging")
     if not missing_vars:
         print("All environment variables validated successfully")
     

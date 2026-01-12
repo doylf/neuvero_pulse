@@ -1,0 +1,92 @@
+-- 1. Enable the Vector Extension (for future AI memory)
+create extension if not exists vector;
+
+-- 2. ORGANIZATIONS (B2B Layer)
+create table organizations (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  plan_type text check (plan_type in ('Free', 'Pro', 'Enterprise')) default 'Free',
+  created_at timestamptz default now()
+);
+
+-- 3. USERS (Identity Layer)
+create table users (
+  id uuid default gen_random_uuid() primary key,
+  phone text unique,  -- Nullable to allow Web/Slack users later
+  email text unique,
+  status text check (status in ('Active', 'Paused', 'Banned')) default 'Active',
+  org_id uuid references organizations(id),
+  
+  -- State Persistence (Where they left off)
+  current_flow text,       -- e.g. 'flow_onboarding'
+  current_step_id text,    -- e.g. 'step_3'
+  last_active timestamptz default now(),
+  created_at timestamptz default now()
+);
+
+-- 4. CONVERSATIONS (The Logs)
+create table conversations (
+  id bigint generated always as identity primary key,
+  user_id uuid references users(id) not null,
+  
+  -- Metadata
+  channel_id text,         -- Raw phone number or Slack ID used
+  flow_context text,       -- Which flow were they in?
+  step_context text,       -- Which step?
+  
+  -- Content
+  user_message text,
+  gemini_response text,
+  
+  created_at timestamptz default now()
+);
+
+-- 5. EVENTS (The High-Value Journal)
+create table events (
+  id bigint generated always as identity primary key,
+  user_id uuid references users(id) not null,
+  
+  category text check (category in ('Win', 'Gratitude', 'Crisis', 'Feedback', 'System')),
+  content text not null,   -- The actual Win text
+  
+  conversation_ref bigint references conversations(id), -- Link back to raw log
+  occurred_at date default CURRENT_DATE
+);
+
+-- 6. KNOWLEDGE_GRAPH (The Memory / Facts)
+create table knowledge_graph (
+  id bigint generated always as identity primary key,
+  user_id uuid references users(id) not null,
+  
+  -- The Triple
+  subject text not null,    -- e.g. "Bob (Boss)"
+  predicate text not null,  -- e.g. "IS_A"
+  object text not null,     -- e.g. "Systemizer"
+  
+  -- AI Vector Embedding (1536 dims for OpenAI/Gemini embeddings)
+  embedding vector(1536), 
+  
+  created_at timestamptz default now(),
+  
+  -- Constraint: Prevent duplicate facts for the same user
+  unique(user_id, subject, predicate, object)
+);
+
+-- 7. SCHEDULED_TASKS (The Time Machine)
+create table scheduled_tasks (
+  id bigint generated always as identity primary key,
+  user_id uuid references users(id) not null,
+  
+  flow_id text not null,
+  step_id text not null,
+  execute_at timestamptz not null,
+  
+  status text check (status in ('Pending', 'Completed', 'Cancelled')) default 'Pending',
+  created_at timestamptz default now()
+);
+
+-- INDEXES for Speed
+create index idx_users_phone on users(phone);
+create index idx_conversations_user on conversations(user_id);
+create index idx_kg_user on knowledge_graph(user_id);
+create index idx_schedule_status on scheduled_tasks(status, execute_at);
