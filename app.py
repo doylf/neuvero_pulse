@@ -2,7 +2,10 @@ import os
 import sys
 import json
 import yaml
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
+import threading
+import time
 
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
@@ -49,10 +52,130 @@ else:
     gemini_model = None
     print("Warning: Gemini AI not connected.")
 
+twilio_client = None
 if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-else:
-    twilio_client = None
+
+
+class SessionManager:
+    
+    @staticmethod
+    def get_session(phone):
+        if not supabase:
+            return None
+        try:
+            result = supabase.table('sessions').select('*').eq('phone', phone).execute()
+            if result.data and len(result.data) > 0:
+                row = result.data[0]
+                return {
+                    'current_flow': row.get('current_flow'),
+                    'step_order': row.get('step_order', 0),
+                    'slots': row.get('slots', {}),
+                    'pending_slot': row.get('pending_slot'),
+                    'timezone': row.get('timezone', 'America/New_York')
+                }
+        except Exception as e:
+            print(f"Error getting session: {e}")
+        return None
+
+    @staticmethod
+    def save_session(phone, session):
+        if not supabase:
+            return
+        try:
+            data = {
+                'phone': phone,
+                'current_flow': session.get('current_flow'),
+                'step_order': session.get('step_order', 0),
+                'slots': session.get('slots', {}),
+                'pending_slot': session.get('pending_slot'),
+                'status': 'active',
+                'updated_at': datetime.utcnow().isoformat()
+            }
+            supabase.table('sessions').upsert(data, on_conflict='phone').execute()
+        except Exception as e:
+            print(f"Error saving session: {e}")
+
+    @staticmethod
+    def clear_session(phone):
+        if not supabase:
+            return
+        try:
+            supabase.table('sessions').delete().eq('phone', phone).execute()
+        except Exception as e:
+            print(f"Error clearing session: {e}")
+
+
+class ScheduleManager:
+    
+    @staticmethod
+    def schedule_step(phone, flow_id, resume_step, slots, delay_hours=None, delay_days=None, 
+                      resume_time=None, resume_weekday=None, message_template=None, timezone='America/New_York'):
+        if not supabase:
+            return
+        
+        now = datetime.utcnow()
+        run_at = now
+        
+        if delay_hours:
+            run_at = now + timedelta(hours=delay_hours)
+        elif delay_days:
+            run_at = now + timedelta(days=delay_days)
+            if resume_time:
+                hour, minute = map(int, resume_time.split(':'))
+                run_at = run_at.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        
+        if resume_weekday is not None:
+            days_ahead = resume_weekday - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            run_at = now + timedelta(days=days_ahead)
+            if resume_time:
+                hour, minute = map(int, resume_time.split(':'))
+                run_at = run_at.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        
+        try:
+            supabase.table('scheduled_events').insert({
+                'phone': phone,
+                'flow_id': flow_id,
+                'resume_step': resume_step,
+                'slots': slots,
+                'run_at': run_at.isoformat(),
+                'timezone': timezone,
+                'status': 'pending',
+                'message_template': message_template
+            }).execute()
+            print(f"Scheduled event for {phone} at {run_at}")
+        except Exception as e:
+            print(f"Error scheduling event: {e}")
+
+    @staticmethod
+    def get_due_events():
+        if not supabase:
+            return []
+        try:
+            now = datetime.utcnow().isoformat()
+            result = supabase.table('scheduled_events')\
+                .select('*')\
+                .eq('status', 'pending')\
+                .lte('run_at', now)\
+                .execute()
+            return result.data if result.data else []
+        except Exception as e:
+            print(f"Error getting due events: {e}")
+            return []
+
+    @staticmethod
+    def mark_processed(event_id):
+        if not supabase:
+            return
+        try:
+            supabase.table('scheduled_events').update({
+                'status': 'processed',
+                'processed_at': datetime.utcnow().isoformat()
+            }).eq('id', event_id).execute()
+        except Exception as e:
+            print(f"Error marking event processed: {e}")
 
 
 class DataManager:
@@ -102,8 +225,6 @@ class DataManager:
 
 
 db = DataManager()
-
-user_sessions = {}
 
 
 class ActionEngine:
@@ -231,33 +352,53 @@ def check_guard(guard_str, user_input, slots):
     return False
 
 
-def process_conversation(phone, user_input):
-    session = user_sessions.get(phone, {
-        'current_flow': None,
-        'step_order': 0,
-        'slots': {},
-        'pending_slot': None
-    })
+def send_sms(to_phone, message):
+    if twilio_client and TWILIO_PHONE_NUMBER:
+        try:
+            twilio_client.messages.create(
+                body=message,
+                from_=TWILIO_PHONE_NUMBER,
+                to=to_phone
+            )
+            print(f"Sent SMS to {to_phone}: {message[:50]}...")
+            return True
+        except Exception as e:
+            print(f"Error sending SMS: {e}")
+    return False
 
-    new_flow_obj = db.find_trigger_flow(user_input)
 
-    if new_flow_obj:
-        current_flow_id = session['current_flow']
-        current_flow_def = db.get_flow(current_flow_id) if current_flow_id else None
+def process_conversation(phone, user_input, is_scheduled=False):
+    session = SessionManager.get_session(phone)
+    if not session:
+        session = {
+            'current_flow': None,
+            'step_order': 0,
+            'slots': {},
+            'pending_slot': None,
+            'timezone': 'America/New_York'
+        }
 
-        is_locked = current_flow_def.get('is_locked') if current_flow_def else False
+    if not is_scheduled:
+        new_flow_obj = db.find_trigger_flow(user_input)
 
-        if not is_locked or new_flow_obj['flow_id'] == current_flow_id:
-            print(f"Switching context to {new_flow_obj['flow_id']}")
-            session = {
-                'current_flow': new_flow_obj['flow_id'],
-                'step_order': 0,
-                'slots': {},
-                'pending_slot': None
-            }
-            user_sessions[phone] = session
+        if new_flow_obj:
+            current_flow_id = session['current_flow']
+            current_flow_def = db.get_flow(current_flow_id) if current_flow_id else None
+
+            is_locked = current_flow_def.get('is_locked') if current_flow_def else False
+
+            if not is_locked or new_flow_obj['flow_id'] == current_flow_id:
+                print(f"Switching context to {new_flow_obj['flow_id']}")
+                session = {
+                    'current_flow': new_flow_obj['flow_id'],
+                    'step_order': 0,
+                    'slots': {},
+                    'pending_slot': None,
+                    'timezone': session.get('timezone', 'America/New_York')
+                }
 
     if not session['current_flow']:
+        SessionManager.save_session(phone, session)
         return "I'm listening. Text OUCH to start."
 
     response_buffer = []
@@ -277,7 +418,7 @@ def process_conversation(phone, user_input):
 
         if step_type == 'response':
             out_text = content
-            if '{' in out_text:
+            if out_text and '{' in out_text:
                 for k, v in session['slots'].items():
                     val = str(v) if v is not None else ""
                     out_text = out_text.replace(f"{{{k}}}", val)
@@ -302,9 +443,8 @@ def process_conversation(phone, user_input):
             is_blocked = check_guard(guard, user_input, session['slots'])
             if is_blocked:
                 response_buffer.append(f"Please reply with '{content}'.")
-                user_sessions[phone] = session
+                SessionManager.save_session(phone, session)
                 return "\n".join(response_buffer)
-
             session['step_order'] += 1
 
         elif step_type == 'collect':
@@ -314,12 +454,44 @@ def process_conversation(phone, user_input):
                 session['pending_slot'] = variable
                 break
 
-    user_sessions[phone] = session
+        elif step_type == 'schedule':
+            delay_hours = current_step.get('delay_hours')
+            delay_days = current_step.get('delay_days')
+            resume_time = current_step.get('resume_time')
+            resume_weekday = current_step.get('resume_weekday')
+            message_template = current_step.get('message_template')
+            
+            ScheduleManager.schedule_step(
+                phone=phone,
+                flow_id=session['current_flow'],
+                resume_step=session['step_order'] + 1,
+                slots=session['slots'],
+                delay_hours=delay_hours,
+                delay_days=delay_days,
+                resume_time=resume_time,
+                resume_weekday=resume_weekday,
+                message_template=message_template,
+                timezone=session.get('timezone', 'America/New_York')
+            )
+            
+            if content:
+                out_text = content
+                if '{' in out_text:
+                    for k, v in session['slots'].items():
+                        val = str(v) if v is not None else ""
+                        out_text = out_text.replace(f"{{{k}}}", val)
+                response_buffer.append(out_text)
+            
+            session['step_order'] += 1
+            session['current_flow'] = None
+            break
+
+    SessionManager.save_session(phone, session)
 
     final_response_text = "\n".join(response_buffer) if response_buffer else ""
 
     try:
-        if supabase:
+        if supabase and final_response_text:
             supabase.table('conversations').insert({
                 "phone": phone,
                 "user_message": user_input,
@@ -332,6 +504,54 @@ def process_conversation(phone, user_input):
         print(f"Logging Error: {e}")
 
     return final_response_text
+
+
+def process_scheduled_events():
+    events = ScheduleManager.get_due_events()
+    for event in events:
+        try:
+            phone = event['phone']
+            flow_id = event['flow_id']
+            resume_step = event['resume_step']
+            slots = event.get('slots', {})
+            message_template = event.get('message_template')
+            
+            session = {
+                'current_flow': flow_id,
+                'step_order': resume_step,
+                'slots': slots,
+                'pending_slot': None,
+                'timezone': event.get('timezone', 'America/New_York')
+            }
+            SessionManager.save_session(phone, session)
+            
+            if message_template:
+                out_text = message_template
+                if '{' in out_text:
+                    for k, v in slots.items():
+                        val = str(v) if v is not None else ""
+                        out_text = out_text.replace(f"{{{k}}}", val)
+                send_sms(phone, out_text)
+            else:
+                response = process_conversation(phone, '', is_scheduled=True)
+                if response:
+                    send_sms(phone, response)
+            
+            ScheduleManager.mark_processed(event['id'])
+            print(f"Processed scheduled event {event['id']} for {phone}")
+            
+        except Exception as e:
+            print(f"Error processing scheduled event: {e}")
+
+
+def scheduler_worker():
+    print("Scheduler worker started")
+    while True:
+        try:
+            process_scheduled_events()
+        except Exception as e:
+            print(f"Scheduler error: {e}")
+        time.sleep(60)
 
 
 @app.route('/sms', methods=['POST'])
@@ -347,7 +567,7 @@ def sms_reply():
 
     print(f"SMS From {from_number}: {incoming_msg}")
 
-    session = user_sessions.get(from_number)
+    session = SessionManager.get_session(from_number)
     is_trigger = db.find_trigger_flow(incoming_msg)
 
     if session and session.get('pending_slot') and not is_trigger:
@@ -355,7 +575,7 @@ def sms_reply():
         print(f"Filling Slot {slot_name} with '{incoming_msg}'")
         session['slots'][slot_name] = incoming_msg
         session['pending_slot'] = None
-        user_sessions[from_number] = session
+        SessionManager.save_session(from_number, session)
 
     try:
         response_text = process_conversation(from_number, incoming_msg)
@@ -375,7 +595,8 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "service": "mybrain@work SMS service",
-        "database": "Supabase"
+        "database": "Supabase",
+        "features": ["persistent_sessions", "scheduled_flows"]
     }), 200
 
 
@@ -385,12 +606,19 @@ def refresh_logic():
     return jsonify({"status": "Logic Refreshed from YAML"}), 200
 
 
+@app.route('/process-scheduled', methods=['POST'])
+def trigger_scheduled():
+    process_scheduled_events()
+    return jsonify({"status": "Processed scheduled events"}), 200
+
+
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
         "message": "mybrain@work SMS service is running",
         "webhook_endpoint": "/sms",
-        "database": "Supabase"
+        "database": "Supabase",
+        "features": ["persistent_sessions", "scheduled_flows"]
     }), 200
 
 
@@ -399,6 +627,11 @@ if __name__ == '__main__':
     print(f"Twilio phone number: {TWILIO_PHONE_NUMBER}")
     print(f"Database: Supabase")
     print(f"AI Model: Google Gemini 2.0 Flash")
+    print("Features: Persistent Sessions, Scheduled Flows")
     if not missing_vars:
         print("All environment variables validated successfully")
+    
+    scheduler_thread = threading.Thread(target=scheduler_worker, daemon=True)
+    scheduler_thread.start()
+    
     app.run(host='0.0.0.0', port=8000, debug=False)

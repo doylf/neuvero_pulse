@@ -11,6 +11,12 @@ flows:
     is_locked: true
     description: Emergency response flow for crisis situations
 
+  - flow_id: followup_flow
+    flow_name: Follow-up Check-in
+    triggers: ""
+    is_locked: false
+    description: Scheduled follow-up flow
+
 steps:
   - flow_id: ouch_flow
     step_order: 1
@@ -79,6 +85,27 @@ steps:
     step_order: 2
     step_type: action
     content: alert_admin
+    variable: null
+    guard: null
+
+  - flow_id: followup_flow
+    step_order: 1
+    step_type: response
+    content: "Checking in! How are you feeling today after our last conversation?"
+    variable: null
+    guard: null
+
+  - flow_id: followup_flow
+    step_order: 2
+    step_type: collect
+    content: null
+    variable: followup_response
+    guard: null
+
+  - flow_id: followup_flow
+    step_order: 3
+    step_type: response
+    content: "Thanks for sharing. Remember, you've got this!"
     variable: null
     guard: null
 
