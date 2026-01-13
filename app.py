@@ -15,7 +15,6 @@ from twilio.rest import Client
 from supabase import create_client, Client as SupabaseClient
 import google.generativeai as genai
 from jsonschema import validate, ValidationError
-from system_prompt import SYSTEM_PROMPT
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get(
@@ -49,14 +48,10 @@ if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
 else:
     print("Warning: Supabase not connected.")
 
+gemini_model = None
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp',
-                                         system_instruction=SYSTEM_PROMPT)
-    print("Gemini AI connected with Neuvero Pulse system prompt.")
-else:
-    gemini_model = None
-    print("Warning: Gemini AI not connected.")
+    print("Gemini API key configured.")
 
 twilio_client = None
 if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
@@ -425,6 +420,14 @@ class DataManager:
 
 
 db = DataManager()
+
+if GEMINI_API_KEY:
+    system_prompt = db.get_system_prompt('default')
+    gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp',
+                                         system_instruction=system_prompt)
+    print("Gemini AI connected with Neuvero Pulse system prompt.")
+else:
+    print("Warning: Gemini AI not connected.")
 
 
 class ActionEngine:

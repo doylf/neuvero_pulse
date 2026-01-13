@@ -17,7 +17,6 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 ```
 /neuvero-pulse
   ├── app.py                 # Flask Application & Webhook Listener
-  ├── system_prompt.py       # Neuvero Pulse AI persona
   ├── flow_schema.json       # JSON schema for YAML validation
   ├── requirements.txt       # Dependencies
   │
