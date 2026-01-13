@@ -21,6 +21,9 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
   ├── flow_schema.json       # JSON schema for YAML validation
   ├── requirements.txt       # Dependencies
   │
+  ├── templates/
+  │    └── assessment.html   # Web-based leadership assessment quiz
+  │
   ├── data/
   │    └── config.yaml       # Global settings, system prompts, slots, symptoms
   │
@@ -28,7 +31,8 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
        ├── router.yaml           # Main menu & command routing
        ├── module_ouch.yaml      # OUCH / Crisis coaching
        ├── module_emergency.yaml # Emergency response flow
-       └── module_followup.yaml  # Scheduled check-ins
+       ├── module_followup.yaml  # Scheduled check-ins
+       └── module_assessment.yaml # Assessment verification flow
 ```
 
 ### Key Components
@@ -93,7 +97,9 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 - `GET /` - Home endpoint with service info
 - `GET /health` - Health check endpoint
 - `GET /refresh` - Reload all YAML modules without restarting
+- `GET /assessment` - Web-based leadership style assessment quiz
 - `POST /sms` - Twilio webhook for incoming SMS
+- `POST /hooks/typeform` - Webhook for assessment form submissions
 - `POST /process-scheduled` - Manual trigger for scheduled tasks
 
 ## Configuration
@@ -137,6 +143,13 @@ flows:
 3. Call `/refresh` endpoint or restart to load
 
 ## Recent Changes
+- 2026-01-13: **Web Assessment Survey Integration**
+  - Added /assessment endpoint with leadership style quiz
+  - Added /hooks/typeform webhook for form submissions
+  - New generate_profile_insights action for personalized coaching
+  - flows/module_assessment.yaml for SMS verification flow
+  - Fixed slot preservation when switching flows
+
 - 2026-01-13: **Modular Architecture Refactoring**
   - Split single flows.yaml into data/config.yaml + flows/*.yaml cartridges
   - DataManager now merges all flow modules at startup
