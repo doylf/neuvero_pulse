@@ -1,0 +1,49 @@
+flows:
+  flow_router:
+    description: "The Main Menu / Command Line Interface"
+    triggers: ["MENU", "menu", "HELP", "help", "START", "start"]
+    steps:
+      - id: step_1
+        type: response
+        content: |
+          System Online.
+          
+          FIX:
+          OUCH (Hurt/Venting)
+          UNBLOCK (Stuck/Frozen)
+          CALM (Anxious/Spinning)
+          
+          OPTIMIZE:
+          DEBUG (Decode People)
+          LEARN (Prep/Skills)
+          WIN (Log Success)
+          
+          Command?
+
+      - id: step_2
+        type: collect
+        variable: menu_choice
+      
+      - id: step_3
+        type: branch
+        condition: "input == 'OUCH'"
+        target_flow: ouch_flow
+      
+      - id: step_4
+        type: branch
+        condition: "input == 'UNBLOCK'"
+        target_flow: unblock_flow
+        
+      - id: step_5
+        type: branch
+        condition: "input == 'DEBUG'"
+        target_flow: debug_flow
+      
+      - id: step_6
+        type: branch
+        condition: "input == 'WIN'"
+        target_flow: win_flow
+        
+      - id: step_7
+        type: response
+        content: "Unknown command. Try OUCH, UNBLOCK, DEBUG, or WIN."

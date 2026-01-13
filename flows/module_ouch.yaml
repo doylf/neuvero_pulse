@@ -1,0 +1,30 @@
+flows:
+  ouch_flow:
+    description: "OUCH - Career coaching for hurt/venting moments"
+    triggers: ["OUCH", "ouch"]
+    steps:
+      - id: step_1
+        type: response
+        content: "Welcome! I hear you. What is bothering you at work? (Co-worker, Boss, or Self-doubt?)"
+      - id: step_2
+        type: collect
+        variable: stress_trigger
+      - id: step_3
+        type: response
+        content: "Tell me more about what happened with your {stress_trigger}."
+      - id: step_4
+        type: collect
+        variable: user_message
+      - id: step_5
+        type: action
+        action_name: analyze_stress_gemini
+      - id: step_6
+        type: branch
+        condition: "ai_analysis.category == EMERGENCY"
+        target_flow: emergency_flow
+      - id: step_7
+        type: action
+        action_name: generate_final_advice
+      - id: step_8
+        type: response
+        content: "{final_advice}"

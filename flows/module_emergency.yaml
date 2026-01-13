@@ -1,0 +1,12 @@
+flows:
+  emergency_flow:
+    description: "Emergency response flow for crisis situations"
+    triggers: []
+    is_locked: true
+    steps:
+      - id: step_1
+        type: response
+        content: "That sounds urgent. Please text 988 for free crisis support now. You're not alone."
+      - id: step_2
+        type: action
+        action_name: alert_admin

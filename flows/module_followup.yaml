@@ -1,0 +1,14 @@
+flows:
+  followup_flow:
+    description: "Scheduled follow-up flow for check-ins"
+    triggers: []
+    steps:
+      - id: step_1
+        type: response
+        content: "Checking in! How are you feeling today after our last conversation?"
+      - id: step_2
+        type: collect
+        variable: followup_response
+      - id: step_3
+        type: response
+        content: "Thanks for sharing. Remember, you've got this!"

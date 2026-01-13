@@ -1,0 +1,181 @@
+This is the foundational step. We are moving from a "Script" (single file) to an "Application" (modular architecture).
+
+Here is the blueprint for your new file system and the Python code required to power it.
+
+### 1. The File Structure
+
+Create this directory structure on your machine. This separates the **System Configuration** from the **Business Logic**.
+
+```text
+/neuvero-pulse
+  ├── app.py                 # The Flask Application & Webhook Listener
+  ├── requirements.txt       # Dependencies
+  ├── .env                   # API Keys (Twilio, OpenAI, Supabase)
+  │
+  ├── data/
+  │    └── config.yaml       # GLOBAL SETTINGS (System Prompts, Fallbacks)
+  │
+  └── flows/                 # THE CARTRIDGES (Logic Modules)
+       ├── router.yaml           # The OS: Main Menu & Traffic Cop
+       ├── marketing_hooks.yaml  # TypeForm Entry Points & Verification
+       ├── campaign_nurture.yaml # The 4-Day Drip Sequences
+       ├── module_ouch.yaml      # OUCH / Crisis Logic
+       ├── module_unblock.yaml   # UNBLOCK / Executive Function Logic
+       ├── module_debug.yaml     # DEBUG / People Logic
+       └── module_learn.yaml     # LEARN / Content Logic
+
+```
+
+### 2. The Python Loader (The "Kernel")
+
+We need to update your `DataManager` class. Instead of reading one file, it will now:
+
+1. Load `config.yaml` as the base.
+2. Scan the `flows/` folder.
+3. Merge every "Cartridge" into the master memory.
+
+**Update your `app.py` (or `data_manager.py`) with this code:**
+
+```python
+import yaml
+import glob
+import os
+import logging
+
+class DataManager:
+    def __init__(self, config_path='data/config.yaml', flows_dir='flows/'):
+        self.config_path = config_path
+        self.flows_dir = flows_dir
+        self.data = {}
+        self.reload_data()
+
+    def reload_data(self):
+        """
+        Merges the Master Config with all Modular Flow files.
+        """
+        master_data = {'flows': {}, 'system_prompts': {}, 'config': {}}
+
+        # 1. Load the Base Config (The OS)
+        if os.path.exists(self.config_path):
+            with open(self.config_path, 'r') as f:
+                config_content = yaml.safe_load(f) or {}
+                # Merge top-level keys
+                for key in master_data.keys():
+                    if key in config_content:
+                        master_data[key].update(config_content[key])
+        else:
+            logging.error(f"Config file not found at {self.config_path}")
+
+        # 2. Load the Cartridges (The Modules)
+        # Finds all .yaml files in the /flows directory
+        flow_files = glob.glob(os.path.join(self.flows_dir, '*.yaml'))
+        
+        for file_path in flow_files:
+            try:
+                with open(file_path, 'r') as f:
+                    module_data = yaml.safe_load(f)
+                    
+                    if not module_data:
+                        continue
+
+                    # Merge 'flows'
+                    if 'flows' in module_data:
+                        # Check for duplicate flow IDs to prevent overwriting
+                        for flow_id, flow_body in module_data['flows'].items():
+                            if flow_id in master_data['flows']:
+                                logging.warning(f"DUPLICATE FLOW ID DETECTED: {flow_id} in {file_path}. Overwriting.")
+                            master_data['flows'][flow_id] = flow_body
+                    
+                    # Merge 'campaigns' (if you have them)
+                    if 'campaigns' in module_data:
+                        if 'campaigns' not in master_data:
+                            master_data['campaigns'] = {}
+                        master_data['campaigns'].update(module_data['campaigns'])
+
+            except Exception as e:
+                logging.error(f"Failed to load module {file_path}: {e}")
+
+        self.data = master_data
+        logging.info(f"System Loaded: {len(self.data['flows'])} flows active.")
+
+    def get_flow(self, flow_id):
+        return self.data['flows'].get(flow_id)
+
+    def get_system_prompt(self, key='default'):
+        return self.data['system_prompts'].get(key, "You are Neuvero Pulse.")
+
+```
+
+### 3. The YAML Setup (Copy/Paste Templates)
+
+To get you started, create these two specific files.
+
+#### A. `data/config.yaml` (The Base)
+
+```yaml
+config:
+  app_name: "Neuvero Pulse"
+  version: "2.0-modular"
+  default_timezone: "America/New_York"
+
+system_prompts:
+  default: |
+    You are Pulse, a cognitive orthotic for executive leadership. 
+    Your tone is concise, biological, and professional. 
+    Do not use fluff. Treat the user as a peer.
+    
+  crisis: |
+    User is in distress. Switch to high-empathy, low-cognitive-load mode.
+    Short sentences. Validate first, then solve.
+
+```
+
+#### B. `flows/router.yaml` (The Menu)
+
+```yaml
+flows:
+  flow_router:
+    description: "The Main Menu / Command Line Interface"
+    # Note: We rely on the NLU/Keyword matcher in Python to route here
+    steps:
+      - type: response
+        content: |
+          System Online. 
+          
+          🔴 FIX:
+          OUCH (Hurt/Venting)
+          UNBLOCK (Stuck/Frozen)
+          CALM (Anxious/Spinning)
+          
+          🟢 OPTIMIZE:
+          DEBUG (Decode People)
+          LEARN (Prep/Skills)
+          WIN (Log Success)
+          
+          Command?
+
+      - type: collect
+        variable: menu_choice
+      
+      # The simple keyword routing
+      - type: branch
+        condition: "input == 'OUCH'"
+        target_flow: flow_ouch_entry
+      
+      - type: branch
+        condition: "input == 'UNBLOCK'"
+        target_flow: flow_unblock_entry
+        
+      - type: branch
+        condition: "input == 'DEBUG'"
+        target_flow: flow_debug_entry
+        
+      # Fallback
+      - type: response
+        content: "Unknown command. Try OUCH, UNBLOCK, or DEBUG."
+
+```
+
+### Next Step
+
+Do you want to implement the **TypeForm Webhook Listener** code (Step 2 of our plan) next, or do you want to write the logic for the **UNBLOCK** module first to test the loader?
