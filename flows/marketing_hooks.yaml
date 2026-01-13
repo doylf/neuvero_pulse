@@ -1,0 +1,92 @@
+flows:
+  hook_style_quiz:
+    description: "LinkedIn Hook - Communication Style"
+    web_survey:
+      slug: "style"
+      title: "Discover Your Neuro-Leadership Style"
+      description: "Are you a Systemizer or an Empathizer? Take the 3-question diagnostic."
+      questions:
+        - id: "q1"
+          text: "A project is failing. What is your first instinct?"
+          options:
+            - text: "Fix the Process (Data, Timelines)"
+              score_key: "sys" 
+            - text: "Fix the People (Morale, Alignment)"
+              score_key: "emp"
+        
+        - id: "q2"
+          text: "In a heated meeting, what annoys you more?"
+          options:
+            - text: "People being rude or blunt."
+              score_key: "emp"
+            - text: "People talking without data."
+              score_key: "sys"
+              
+        - id: "q3"
+          text: "You have 30 minutes before a big presentation. You spend it:"
+          options:
+            - text: "Triple-checking the numbers and slides."
+              score_key: "sys"
+            - text: "Walking around to gauge team energy."
+              score_key: "emp"
+
+      results:
+        logic: "majority_wins"
+        profiles:
+          sys: "Systemizer"
+          emp: "Empathizer"
+
+    triggers: []
+    steps:
+      - id: step_1
+        type: response
+        content: "Welcome to Neuvero Pulse, {first_name}! Your leadership profile: {calculated_profile}."
+      - id: step_2
+        type: action
+        action_name: generate_profile_insights
+      - id: step_3
+        type: response
+        content: "{profile_insights}"
+      - id: step_4
+        type: response
+        content: "Ready to optimize your leadership? Text MENU to see all commands, or OUCH if you need immediate support."
+
+  hook_burnout_quiz:
+    description: "Executive Burnout Index"
+    web_survey:
+      slug: "burnout"
+      title: "The Executive Burnout Index"
+      description: "Is it just stress, or is your hardware overheating?"
+      questions:
+        - id: "q1"
+          text: "How is your sleep quality right now?"
+          options:
+            - text: "Solid (7-8 hours)"
+              score_key: "low"
+            - text: "Fragmented or waking up early"
+              score_key: "high"
+        - id: "q2"
+          text: "When was the last time you took a real break?"
+          options:
+            - text: "Within the last month"
+              score_key: "low"
+            - text: "Can't remember"
+              score_key: "high"
+        - id: "q3"
+          text: "How do you feel on Sunday evenings?"
+          options:
+            - text: "Relaxed, ready for the week"
+              score_key: "low"
+            - text: "Dread creeping in"
+              score_key: "high"
+      results:
+        logic: "majority_wins"
+        profiles:
+          high: "Red Zone"
+          low: "Green Zone"
+    
+    triggers: []
+    steps:
+      - id: step_1
+        type: response
+        content: "Pulse: You scored in the {calculated_profile}. Let's work on that."

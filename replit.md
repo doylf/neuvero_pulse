@@ -22,7 +22,8 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
   ├── requirements.txt       # Dependencies
   │
   ├── templates/
-  │    └── assessment.html   # Web-based leadership assessment quiz
+  │    ├── assessment.html        # Legacy static assessment quiz
+  │    └── assessment_engine.html # Generic survey renderer (data-driven)
   │
   ├── data/
   │    └── config.yaml       # Global settings, system prompts, slots, symptoms
@@ -32,7 +33,8 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
        ├── module_ouch.yaml      # OUCH / Crisis coaching
        ├── module_emergency.yaml # Emergency response flow
        ├── module_followup.yaml  # Scheduled check-ins
-       └── module_assessment.yaml # Assessment verification flow
+       ├── module_assessment.yaml # Assessment verification flow
+       └── marketing_hooks.yaml  # Data-driven web surveys
 ```
 
 ### Key Components
@@ -97,7 +99,8 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 - `GET /` - Home endpoint with service info
 - `GET /health` - Health check endpoint
 - `GET /refresh` - Reload all YAML modules without restarting
-- `GET /assessment` - Web-based leadership style assessment quiz
+- `GET /assessment/<slug>` - Data-driven survey pages (e.g., `/assessment/style`, `/assessment/burnout`)
+- `GET /assessment` - Legacy static assessment page
 - `POST /sms` - Twilio webhook for incoming SMS
 - `POST /hooks/typeform` - Webhook for assessment form submissions
 - `POST /process-scheduled` - Manual trigger for scheduled tasks
@@ -143,8 +146,14 @@ flows:
 3. Call `/refresh` endpoint or restart to load
 
 ## Recent Changes
+- 2026-01-13: **Data-Driven Web Surveys**
+  - Surveys defined in YAML with web_survey block (slug, title, questions, results)
+  - Dynamic route /assessment/<slug> renders surveys from YAML
+  - flows/marketing_hooks.yaml contains style and burnout surveys
+  - templates/assessment_engine.html is the generic survey renderer
+  - Add new surveys by editing YAML - no code changes needed
+
 - 2026-01-13: **Web Assessment Survey Integration**
-  - Added /assessment endpoint with leadership style quiz
   - Added /hooks/typeform webhook for form submissions
   - New generate_profile_insights action for personalized coaching
   - flows/module_assessment.yaml for SMS verification flow

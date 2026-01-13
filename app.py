@@ -845,6 +845,22 @@ def home():
     }), 200
 
 
+@app.route('/assessment/<slug>', methods=['GET'])
+def show_dynamic_assessment(slug):
+    survey_data = None
+    
+    for flow_id, flow_def in db.flows.items():
+        web_config = flow_def.get('web_survey')
+        if web_config and web_config.get('slug') == slug:
+            survey_data = web_config
+            break
+    
+    if not survey_data:
+        return "Survey not found", 404
+
+    return render_template('assessment_engine.html', survey=survey_data)
+
+
 @app.route('/assessment', methods=['GET'])
 def show_assessment():
     return render_template('assessment.html')

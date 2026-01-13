@@ -1,0 +1,271 @@
+Define them in flows/.
+
+Why? High Cohesion. A "Survey" (Web) and its "Result" (SMS) are two sides of the same coin. If you define the survey questions in flows/marketing_hooks.yaml alongside the SMS logic, you can edit the entire campaign in one file. If you separate them, you risk the survey sending data (e.g., "Result: Type_A") that the SMS flow doesn't know how to handle.
+
+Here is the implementation plan:
+
+The YAML: We add a web_survey block to your flow definitions.
+
+The Python: We update the route to load that block dynamically: /assessment/<survey_id>.
+
+The HTML: We rewrite assessment.html to be a generic rendering engine.
+
+Step 1: The YAML Structure (flows/marketing_hooks.yaml)
+We add a web_survey key. This defines the URL slug, title, and questions.
+
+YAML
+
+flows:
+  # ----------------------------------------------------
+  # SURVEY 1: The "Style" Quiz (Systemizer vs Empathizer)
+  # URL: neuvero.ai/assessment/style
+  # ----------------------------------------------------
+  hook_style_quiz:
+    description: "LinkedIn Hook - Communication Style"
+    # This ID matches the URL slug
+    web_survey:
+      slug: "style"
+      title: "Discover Your Neuro-Leadership Style"
+      description: "Are you a Systemizer or an Empathizer? Take the 3-question diagnostic."
+      questions:
+        - id: "q1"
+          text: "A project is failing. What is your first instinct?"
+          options:
+            - text: "Fix the Process (Data, Timelines)"
+              score_key: "sys" 
+            - text: "Fix the People (Morale, Alignment)"
+              score_key: "emp"
+        
+        - id: "q2"
+          text: "In a heated meeting, what annoys you more?"
+          options:
+            - text: "People being rude or blunt."
+              score_key: "emp"
+            - text: "People talking without data."
+              score_key: "sys"
+              
+      results:
+        # Simple majority wins logic (handled in JS)
+        logic: "majority_wins"
+        profiles:
+          sys: "Systemizer"
+          emp: "Empathizer"
+
+    # The SMS Logic (Existing)
+    triggers: []
+    steps:
+      - type: response
+        content: "Pulse: We received a request for a {neuro_profile} Report..."
+
+  # ----------------------------------------------------
+  # SURVEY 2: The "Burnout" Check (New Example)
+  # URL: neuvero.ai/assessment/burnout
+  # ----------------------------------------------------
+  hook_burnout_quiz:
+    web_survey:
+      slug: "burnout"
+      title: "The Executive Burnout Index"
+      description: "Is it just stress, or is your hardware overheating?"
+      questions:
+        - id: "q1"
+          text: "How is your sleep quality right now?"
+          options:
+            - text: "Solid (7-8 hours)"
+              score_key: "low"
+            - text: "Fragmented or waking up early"
+              score_key: "high"
+      results:
+        logic: "majority_wins"
+        profiles:
+          high: "Red Zone"
+          low: "Green Zone"
+    
+    steps:
+      - type: response
+        content: "Pulse: You scored in the **{neuro_profile}**. Let's fix that."
+Step 2: The Python Route (app.py)
+Update your route to accept a slug. It searches your db.flows for a matching web_survey.slug.
+
+Python
+
+@app.route('/assessment/<slug>', methods=['GET'])
+def show_dynamic_assessment(slug):
+    # 1. Search for the flow that owns this survey slug
+    survey_data = None
+    
+    # We iterate through all loaded flows to find the matching slug
+    # (In a real DB, this would be a query. For memory, loop is fine.)
+    for flow_id, flow_def in db.flows.items():
+        web_config = flow_def.get('web_survey')
+        if web_config and web_config.get('slug') == slug:
+            survey_data = web_config
+            break
+    
+    if not survey_data:
+        return "Survey not found", 404
+
+    # 2. Render the generic template with specific data
+    return render_template('assessment_engine.html', survey=survey_data)
+Step 3: The Generic Template (templates/assessment_engine.html)
+Create a new file called assessment_engine.html. This uses Jinja2 to loop through the YAML data and render the questions.
+
+Note: We inject the JSON data into a JavaScript variable surveyConfig so the frontend logic can handle the scoring.
+
+HTML
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ survey.title }} | Neuvero Pulse</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: sans-serif; }
+        .slide { display: none; }
+        .slide.active { display: block; animation: fadeIn 0.5s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div class="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
+        
+        <div class="mb-8 text-center">
+            <h1 class="text-xl font-bold text-sky-400 tracking-wider">NEUVERO PULSE</h1>
+            <div class="h-1 w-16 bg-sky-600 mx-auto mt-2 rounded"></div>
+        </div>
+
+        <form id="quizForm" onsubmit="event.preventDefault()">
+            
+            <div class="slide active" id="slide-intro">
+                <h2 class="text-2xl font-semibold mb-4 text-white">{{ survey.title }}</h2>
+                <p class="text-slate-400 mb-6">{{ survey.description }}</p>
+                <button onclick="nextSlide(0)" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 px-4 rounded-lg transition">Start Assessment</button>
+            </div>
+
+            {% for q in survey.questions %}
+            <div class="slide" id="slide-{{ loop.index0 }}">
+                <label class="block text-lg font-medium mb-4">Q{{ loop.index }}: {{ q.text }}</label>
+                <div class="space-y-3">
+                    {% for opt in q.options %}
+                    <button onclick="recordAnswer('{{ opt.score_key }}'); nextSlide({{ loop.index }})" 
+                            class="w-full text-left p-4 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 hover:border-sky-400 transition">
+                        {{ opt.text }}
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+
+            <div class="slide" id="slide-final">
+                <h2 class="text-xl font-semibold mb-4 text-white">Final Step</h2>
+                <p class="text-slate-400 mb-4 text-sm">We generate your profile via SMS to ensure privacy.</p>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-bold mb-2 text-slate-300">First Name</label>
+                    <input type="text" id="first_name" class="w-full p-3 bg-slate-900 border border-slate-600 rounded text-white focus:outline-none focus:border-sky-500" placeholder="Your Name">
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-bold mb-2 text-slate-300">Mobile Number</label>
+                    <input type="tel" id="phone" class="w-full p-3 bg-slate-900 border border-slate-600 rounded text-white focus:outline-none focus:border-sky-500" placeholder="+1 555 000 0000">
+                </div>
+
+                <button onclick="submitQuiz()" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-lg transition">Get My Results</button>
+            </div>
+
+            <div class="slide text-center" id="slide-success">
+                <div class="text-5xl mb-4">📱</div>
+                <h2 class="text-2xl font-bold text-white mb-2">Check your phone!</h2>
+                <p class="text-slate-400 mb-6">Verification sent to <span id="displayPhone" class="text-sky-400"></span>.</p>
+                <div class="bg-slate-900 p-4 rounded-lg border border-slate-700 inline-block">
+                    <p class="text-sm font-mono text-green-400">Reply <strong>YES</strong> to unlock.</p>
+                </div>
+            </div>
+
+        </form>
+    </div>
+
+    <script>
+        // Pass Python data to JS
+        const totalQuestions = {{ survey.questions|length }};
+        const profiles = {{ survey.results.profiles|tojson }};
+        
+        let scores = {};
+        
+        function nextSlide(currentIndex) {
+            // Hide current
+            const currentId = currentIndex === 0 ? 'slide-intro' : 'slide-' + (currentIndex - 1);
+            document.getElementById(currentId).classList.remove('active');
+            
+            // Show next
+            let nextId;
+            if (currentIndex < totalQuestions) {
+                nextId = 'slide-' + currentIndex;
+            } else {
+                nextId = 'slide-final';
+            }
+            document.getElementById(nextId).classList.add('active');
+        }
+
+        function recordAnswer(key) {
+            if (!scores[key]) scores[key] = 0;
+            scores[key]++;
+        }
+
+        function calculateResult() {
+            // Simple Majority Wins
+            let maxKey = null;
+            let maxVal = -1;
+            for (const [key, val] of Object.entries(scores)) {
+                if (val > maxVal) {
+                    maxVal = val;
+                    maxKey = key;
+                }
+            }
+            // Fallback if generic
+            if (!maxKey && Object.keys(profiles).length > 0) {
+                 maxKey = Object.keys(profiles)[0];
+            }
+            return profiles[maxKey] || "General Profile";
+        }
+
+        function submitQuiz() {
+            const phone = document.getElementById('phone').value;
+            const name = document.getElementById('first_name').value;
+            const result = calculateResult();
+
+            fetch('/hooks/typeform', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    phone: phone,
+                    first_name: name,
+                    calculated_profile: result
+                })
+            }).then(response => {
+                if(response.ok) {
+                    document.getElementById('displayPhone').innerText = phone;
+                    document.getElementById('slide-final').classList.remove('active');
+                    document.getElementById('slide-success').classList.add('active');
+                } else {
+                    alert("Error. Please check your number.");
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+How to Test It
+Update app.py with the new route.
+
+Create templates/assessment_engine.html with the code above.
+
+Update flows/marketing_hooks.yaml to include the web_survey block.
+
+Restart Flask.
+
+Visit: http://localhost:8000/assessment/style
+
+You now have a CMS for surveys built directly into your bot engine. Add a new YAML block, and a new webpage automatically appears.
