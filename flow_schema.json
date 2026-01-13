@@ -1,68 +1,45 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["config", "slots", "flows"],
+  "required": ["flows"],
   "properties": {
-    "config": {
-      "type": "object",
-      "properties": {
-        "default_fallback": { "type": "string" }
-      }
-    },
-    "slots": {
-      "type": "object",
-      "patternProperties": {
-        "^[a-zA-Z0-9_]+$": {
-          "type": "object",
-          "required": ["type"],
-          "properties": {
-            "type": { "enum": ["text", "number", "boolean", "json"] },
-            "persist": { "type": "boolean" },
-            "description": { "type": "string" }
-          }
-        }
-      }
-    },
+    "config": { "type": "object" },
+    "system_prompts": { "type": "object" },
+    "symptoms": { "type": "object" },
+    "slots": { "type": "object" },
+    "campaigns": { "type": "object" },
     "flows": {
       "type": "object",
       "patternProperties": {
         "^[a-zA-Z0-9_]+$": {
           "type": "object",
-          "required": ["steps"],
           "properties": {
             "description": { "type": "string" },
-            "triggers": { "type": "array", "items": { "type": "string" } },
+            "triggers": { 
+              "anyOf": [
+                { "type": "array", "items": { "type": "string" } },
+                { "type": "string" }
+              ]
+            },
+            "is_locked": { "type": "boolean" },
+            "web_survey": { "type": "object" },
             "steps": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["id", "type"],
+                "required": ["type"],
                 "properties": {
                   "id": { "type": "string" },
-                  "type": { "enum": ["response", "collect", "action", "branch", "schedule"] }
-                },
-                "allOf": [
-                  {
-                    "if": { "properties": { "type": { "const": "response" } } },
-                    "then": { "required": ["content"] }
-                  },
-                  {
-                    "if": { "properties": { "type": { "const": "collect" } } },
-                    "then": { "required": ["variable"] }
-                  },
-                  {
-                    "if": { "properties": { "type": { "const": "branch" } } },
-                    "then": { "required": ["condition", "target_flow"] }
-                  },
-                  {
-                    "if": { "properties": { "type": { "const": "action" } } },
-                    "then": { "required": ["action_name"] }
-                  },
-                  {
-                    "if": { "properties": { "type": { "const": "schedule" } } },
-                    "then": { "required": ["delay_hours"] }
-                  }
-                ]
+                  "type": { "enum": ["response", "collect", "action", "branch", "schedule", "validate"] },
+                  "content": { "type": "string" },
+                  "variable": { "type": "string" },
+                  "condition": { "type": "string" },
+                  "target_flow": { "type": "string" },
+                  "action_name": { "type": "string" },
+                  "delay_days": { "type": "integer" },
+                  "delay_hours": { "type": "integer" },
+                  "resume_time": { "type": "string" }
+                }
               }
             }
           }

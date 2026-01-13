@@ -1,0 +1,60 @@
+config:
+  app_name: "Neuvero Pulse"
+  version: "2.0-modular"
+  default_fallback: "I'm listening. Text OUCH to start."
+  default_timezone: "America/New_York"
+
+system_prompts:
+  default: |
+    You are Neuvero Pulse, a cognitive orthotic for executive leadership.
+    Your goal: Transform friction (stress, doubt) into flow (clarity, action).
+    Protocol: 1. Validate (Briefly), 2. Regulate (Identify the blocker), 3. Activate (Pivot to action).
+    Tone: Precise, neuro-informed, concise (SMS-length).
+
+slots:
+  first_name:
+    type: text
+    persist: true
+    description: "User's first name"
+  neuro_profile:
+    type: text
+    persist: true
+    description: "Systemizer vs Empathizer"
+  stress_trigger:
+    type: text
+    persist: false
+    description: "Current stressor (Boss, Peer, Self)"
+  user_message:
+    type: text
+    persist: false
+    description: "The raw input from the user"
+  win_text:
+    type: text
+    persist: false
+    description: "User's logged success"
+  calculated_profile:
+    type: text
+    persist: true
+    description: "Profile from web assessment"
+
+symptoms:
+  micromanagement:
+    name: "Micromanagement"
+    keywords: "boss, control, micromanage, watching, no freedom"
+    description: "Feeling controlled or watched too closely by management"
+  toxic_coworker:
+    name: "Toxic Coworker"
+    keywords: "coworker, colleague, gossip, backstab, credit"
+    description: "Issues with difficult colleagues"
+  imposter_syndrome:
+    name: "Imposter Syndrome"
+    keywords: "not good enough, fraud, imposter, doubt, unqualified"
+    description: "Self-doubt about abilities and qualifications"
+  burnout:
+    name: "Burnout"
+    keywords: "exhausted, tired, overwhelmed, too much, burnout"
+    description: "Physical and mental exhaustion from work"
+  analysis_paralysis:
+    name: "Analysis Paralysis"
+    keywords: "stuck, overthinking, spinning, can't decide"
+    description: "Executive function freeze state"

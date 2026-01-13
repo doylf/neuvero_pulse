@@ -1,0 +1,86 @@
+flows:
+  unblock_flow:
+    description: "Overcoming procrastination and inertia"
+    triggers: ["UNBLOCK", "STUCK", "FROZEN"]
+    steps:
+      - id: step_1
+        type: response
+        content: "Inertia detected. Is the blocker:\n1. Fog (I don't know the first step)\n2. Friction (I don't want to do it)"
+      
+      - id: step_2
+        type: collect
+        variable: unblock_type
+      
+      - id: step_3
+        type: branch
+        condition: "input == '1'"
+        target_flow: unblock_fog_tool
+
+      - id: step_4
+        type: response
+        content: "Friction is usually 'Pain Anticipation'. Your brain thinks the task will hurt."
+      - id: step_5
+        type: response
+        content: "Let's lower the stakes. Commit to doing a **Bad Draft** for just 3 minutes. Can you do that? (Yes/No)"
+      - id: step_6
+        type: collect
+        variable: commit_check
+      - id: step_7
+        type: response
+        content: "Great. Set a timer. Go."
+
+  unblock_fog_tool:
+    description: "Sub-flow for clearing mental fog"
+    steps:
+      - id: step_1
+        type: response
+        content: "Fog means the task is too big. We need a 'Micro-Step'."
+      - id: step_2
+        type: response
+        content: "What is the very first physical action? (e.g., 'Open the Google Doc', 'Find the email'). Text it to me."
+      - id: step_3
+        type: collect
+        variable: micro_step
+      - id: step_4
+        type: response
+        content: "Excellent. Do that one thing right now. Text DONE when finished."
+
+  debug_flow:
+    description: "Decoding difficult people"
+    triggers: ["DEBUG", "DECODE"]
+    steps:
+      - id: step_1
+        type: response
+        content: "Debugging Mode. Who is the error source?\n1. Boss\n2. Peer\n3. Direct Report"
+      - id: step_2
+        type: collect
+        variable: debug_target
+      - id: step_3
+        type: response
+        content: "Let's profile them. When they are stressed, do they:\nA) Explode (Yell, micromanage)\nB) Implode (Ghost, withdraw)"
+      - id: step_4
+        type: collect
+        variable: debug_style
+      - id: step_5
+        type: response
+        content: "Analysis: They are reacting to a loss of safety. Do not argue facts yet. Restore safety first."
+      - id: step_6
+        type: response
+        content: "Try this script: 'I want to ensure I'm aligned with your vision. Can we walk through your expectations one more time?'"
+
+  win_flow:
+    description: "Logging success to build momentum"
+    triggers: ["WIN", "SUCCESS"]
+    steps:
+      - id: step_1
+        type: response
+        content: "Logging success. What did you accomplish?"
+      - id: step_2
+        type: collect
+        variable: win_text
+      - id: step_3
+        type: action
+        action_name: save_win
+      - id: step_4
+        type: response
+        content: "Logged. Success anchored."

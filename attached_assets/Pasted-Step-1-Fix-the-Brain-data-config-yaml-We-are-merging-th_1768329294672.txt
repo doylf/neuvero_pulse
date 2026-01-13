@@ -1,0 +1,231 @@
+Step 1: Fix the Brain (data/config.yaml)
+We are merging the useful parts of the old flows.yaml into your main config.
+
+Action: Overwrite data/config.yaml with this. Note that I have moved the Symptoms and Slots here so they are globally available.
+
+YAML
+
+config:
+  app_name: "Neuvero Pulse"
+  version: "2.0-modular"
+  default_fallback: "I'm listening. Text OUCH to start."
+  default_timezone: "America/New_York"
+
+system_prompts:
+  default: |
+    You are Neuvero Pulse, a cognitive orthotic for executive leadership.
+    Your goal: Transform friction (stress, doubt) into flow (clarity, action).
+    Protocol: 1. Validate (Briefly), 2. Regulate (Identify the blocker), 3. Activate (Pivot to action).
+    Tone: Precise, neuro-informed, concise (SMS-length).
+
+# ----------------------------------------------------
+# GLOBAL MEMORY SLOTS
+# ----------------------------------------------------
+slots:
+  first_name:
+    type: text
+    persist: true
+    description: "User's first name"
+  neuro_profile:
+    type: text
+    persist: true
+    description: "Systemizer vs Empathizer"
+  stress_trigger:
+    type: text
+    persist: false
+    description: "Current stressor (Boss, Peer, Self)"
+  user_message:
+    type: text
+    persist: false
+    description: "The raw input from the user"
+  win_text:
+    type: text
+    persist: false
+    description: "User's logged success"
+
+# ----------------------------------------------------
+# KNOWLEDGE BASE (Symptoms)
+# ----------------------------------------------------
+symptoms:
+  micromanagement:
+    name: "Micromanagement"
+    keywords: "boss, control, micromanage, watching, no freedom"
+    description: "Feeling controlled or watched too closely by management"
+  toxic_coworker:
+    name: "Toxic Coworker"
+    keywords: "coworker, colleague, gossip, backstab, credit"
+    description: "Issues with difficult colleagues"
+  imposter_syndrome:
+    name: "Imposter Syndrome"
+    keywords: "not good enough, fraud, imposter, doubt, unqualified"
+    description: "Self-doubt about abilities and qualifications"
+  burnout:
+    name: "Burnout"
+    keywords: "exhausted, tired, overwhelmed, too much, burnout"
+    description: "Physical and mental exhaustion from work"
+  analysis_paralysis:
+    name: "Analysis Paralysis"
+    keywords: "stuck, overthinking, spinning, can't decide"
+    description: "Executive function freeze state"
+Step 2: Create the Missing Organs (flows/module_core.yaml)
+This file provides the logic for the buttons currently leading to nowhere (UNBLOCK, DEBUG, WIN).
+
+Action: Create flows/module_core.yaml.
+
+YAML
+
+flows:
+  # ----------------------------------------------------
+  # 🔴 UNBLOCK (The Tow Truck)
+  # Focus: Executive Function / Task Initiation
+  # ----------------------------------------------------
+  unblock_flow:
+    description: "Overcoming procrastination and inertia"
+    triggers: ["UNBLOCK", "STUCK", "FROZEN"]
+    steps:
+      - id: step_1
+        type: response
+        content: "Inertia detected. Is the blocker:\n1. Fog (I don't know the first step)\n2. Friction (I don't want to do it)"
+      
+      - id: step_2
+        type: collect
+        variable: unblock_type
+      
+      - id: step_3
+        type: branch
+        condition: "input == '1'"
+        target_flow: unblock_fog_tool
+
+      # Path 2: Friction
+      - id: step_4
+        type: response
+        content: "Friction is usually 'Pain Anticipation'. Your brain thinks the task will hurt."
+      - id: step_5
+        type: response
+        content: "Let's lower the stakes. Commit to doing a **Bad Draft** for just 3 minutes. Can you do that? (Yes/No)"
+      - id: step_6
+        type: collect
+        variable: commit_check
+      - id: step_7
+        type: response
+        content: "Great. Set a timer. Go."
+
+  unblock_fog_tool:
+    steps:
+      - id: step_1
+        type: response
+        content: "Fog means the task is too big. We need a 'Micro-Step'."
+      - id: step_2
+        type: response
+        content: "What is the very first physical action? (e.g., 'Open the Google Doc', 'Find the email'). Text it to me."
+      - id: step_3
+        type: collect
+        variable: micro_step
+      - id: step_4
+        type: response
+        content: "Excellent. Do that one thing right now. Text DONE when finished."
+
+  # ----------------------------------------------------
+  # 🟢 DEBUG (The Translator)
+  # Focus: Conflict Resolution / Neuro-Translation
+  # ----------------------------------------------------
+  debug_flow:
+    description: "Decoding difficult people"
+    triggers: ["DEBUG", "DECODE"]
+    steps:
+      - id: step_1
+        type: response
+        content: "Debugging Mode. Who is the error source?\n1. Boss\n2. Peer\n3. Direct Report"
+      - id: step_2
+        type: collect
+        variable: debug_target
+      - id: step_3
+        type: response
+        content: "Let's profile them. When they are stressed, do they:\nA) Explode (Yell, micromanage)\nB) Implode (Ghost, withdraw)"
+      - id: step_4
+        type: collect
+        variable: debug_style
+      - id: step_5
+        type: response
+        content: "Analysis: They are reacting to a loss of safety. Do not argue facts yet. Restore safety first."
+      - id: step_6
+        type: response
+        content: "Try this script: 'I want to ensure I'm aligned with your vision. Can we walk through your expectations one more time?'"
+
+  # ----------------------------------------------------
+  # 🟢 WIN (The Anchor)
+  # Focus: Dopamine / Gratitude
+  # ----------------------------------------------------
+  win_flow:
+    description: "Logging success to build momentum"
+    triggers: ["WIN", "SUCCESS"]
+    steps:
+      - id: step_1
+        type: response
+        content: "Logging success. What did you accomplish?"
+      - id: step_2
+        type: collect
+        variable: win_text
+      - id: step_3
+        type: action
+        action_name: save_win
+      - id: step_4
+        type: response
+        content: "Logged. Success anchored."
+Step 3: Fix the Schema (flow_schema.json)
+Your app.py uses this to validate YAMLs. It needs to know about web_survey or it might reject your marketing file.
+
+Action: Update flow_schema.json to be more permissive for the new features.
+
+JSON
+
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["flows"],
+  "properties": {
+    "config": { "type": "object" },
+    "system_prompts": { "type": "object" },
+    "symptoms": { "type": "object" },
+    "slots": { "type": "object" },
+    "campaigns": { "type": "object" },
+    "flows": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z0-9_]+$": {
+          "type": "object",
+          "properties": {
+            "description": { "type": "string" },
+            "triggers": { 
+              "anyOf": [
+                { "type": "array", "items": { "type": "string" } },
+                { "type": "string" }
+              ]
+            },
+            "is_locked": { "type": "boolean" },
+            "web_survey": { "type": "object" },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "type": { "enum": ["response", "collect", "action", "branch", "schedule", "validate"] },
+                  "content": { "type": "string" },
+                  "variable": { "type": "string" },
+                  "condition": { "type": "string" },
+                  "target_flow": { "type": "string" },
+                  "action_name": { "type": "string" },
+                  "delay_days": { "type": "integer" },
+                  "delay_hours": { "type": "integer" },
+                  "resume_time": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
