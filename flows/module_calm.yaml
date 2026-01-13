@@ -1,0 +1,8 @@
+calm_flow:
+steps:
+  - type: response
+    content: "[TODO: Insert Validation Statement - 'I see you are spinning']"
+  - type: response
+    content: "[TODO: Insert 4-7-8 Breathing Exercise]"
+  - type: response
+    content: "[TODO: Insert Grounding Question - '5 things you see']"

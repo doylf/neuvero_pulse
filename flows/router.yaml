@@ -43,7 +43,12 @@ flows:
         type: branch
         condition: "input == 'WIN'"
         target_flow: win_flow
-        
+
       - id: step_7
+        type: branch
+        condition: "input == 'CALM'"
+        target_flow: calm_flow
+        
+      - id: step_8
         type: response
         content: "Unknown command. Try OUCH, UNBLOCK, DEBUG, or WIN."
