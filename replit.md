@@ -1,4 +1,4 @@
-# mybrain@work SMS Service
+# Neuvero Pulse SMS Service
 
 ## Overview
 A Python Flask application that receives SMS messages via Twilio webhooks, processes them using Google Gemini AI with a multi-step conversation flow for career coaching support, and stores interaction history in Supabase.
@@ -11,36 +11,57 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 - **AI/LLM**: Google Gemini 2.0 Flash
 - **Database**: Supabase (PostgreSQL with vector extension)
 - **Production Server**: Gunicorn
-- **State Management**: User table for flow state, in-memory for slot values
+- **State Management**: Users table stores flow state + slots (JSONB)
+
+### File Structure (Modular Architecture)
+```
+/neuvero-pulse
+  ├── app.py                 # Flask Application & Webhook Listener
+  ├── system_prompt.py       # Neuvero Pulse AI persona
+  ├── flow_schema.json       # JSON schema for YAML validation
+  ├── requirements.txt       # Dependencies
+  │
+  ├── data/
+  │    └── config.yaml       # Global settings, system prompts, slots, symptoms
+  │
+  └── flows/                 # Modular Flow "Cartridges"
+       ├── router.yaml           # Main menu & command routing
+       ├── module_ouch.yaml      # OUCH / Crisis coaching
+       ├── module_emergency.yaml # Emergency response flow
+       └── module_followup.yaml  # Scheduled check-ins
+```
 
 ### Key Components
 
-1. **Flow-Based Conversation Engine**
-   - Flow definitions stored in `flows.yaml` (version controlled)
-   - Supports step types: response, collect, action, branch, validate, schedule
+1. **Modular DataManager (The Kernel)**
+   - Loads `data/config.yaml` as base configuration
+   - Scans `flows/*.yaml` and merges all flow modules
+   - Validates each module against step type schema
+   - Detects duplicate flow IDs with warnings
+
+2. **Flow-Based Conversation Engine**
+   - Step types: response, collect, action, branch, validate, schedule
+   - Infinite loop guard (max 50 iterations)
    - Symptoms knowledge base for stress pattern matching
 
-2. **SMS Webhook Endpoint** (`/sms`)
+3. **SMS Webhook Endpoint** (`/sms`)
    - Receives incoming SMS messages from Twilio
    - Auto-creates users by phone number
-   - Detects flow triggers (e.g., "OUCH")
+   - Detects flow triggers (e.g., "OUCH", "MENU")
    - Executes conversation steps in order
    - Uses Gemini for analysis and response generation
 
-3. **Scheduled Tasks**
+4. **Session Persistence**
+   - Flow state stored in users table (current_flow, current_step_id)
+   - Slots persisted in users.slots JSONB column
+   - Sessions survive server restarts
+
+5. **Scheduled Tasks**
    - Background scheduler worker runs every 60 seconds
    - Processes due scheduled_tasks and sends SMS via Twilio
    - Proper timezone handling (user local time → UTC storage)
 
-4. **Events Logging**
-   - Wins, Gratitude, Crisis events stored separately
-   - Linked back to conversation logs
-
 ### Supabase Database Schema
-
-**organizations** - B2B layer:
-- `id` (UUID PRIMARY KEY)
-- `name`, `plan_type` (Free/Pro/Enterprise)
 
 **users** - Identity and session state:
 - `id` (UUID PRIMARY KEY)
@@ -48,6 +69,7 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 - `status` (Active/Paused/Banned)
 - `org_id` (references organizations)
 - `current_flow`, `current_step_id` - Flow state persistence
+- `slots` (JSONB) - Conversation context persistence
 - `last_active`, `created_at`
 
 **conversations** - Chat logs:
@@ -62,11 +84,6 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 - `category` (Win/Gratitude/Crisis/Feedback/System)
 - `content`, `conversation_ref`, `occurred_at`
 
-**knowledge_graph** - AI memory with vectors:
-- `id` (BIGINT IDENTITY)
-- `user_id`, `subject`, `predicate`, `object`
-- `embedding` (vector 1536 dims)
-
 **scheduled_tasks** - Timed flow continuations:
 - `id` (BIGINT IDENTITY)
 - `user_id`, `flow_id`, `step_id`
@@ -75,7 +92,7 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 ### API Endpoints
 - `GET /` - Home endpoint with service info
 - `GET /health` - Health check endpoint
-- `GET /refresh` - Reload flows from YAML
+- `GET /refresh` - Reload all YAML modules without restarting
 - `POST /sms` - Twilio webhook for incoming SMS
 - `POST /process-scheduled` - Manual trigger for scheduled tasks
 
@@ -100,19 +117,42 @@ A Python Flask application that receives SMS messages via Twilio webhooks, proce
 gunicorn --bind=0.0.0.0:8000 --reuse-port --workers=1 app:app
 ```
 
+## Adding New Flow Modules
+
+1. Create a new YAML file in `flows/` directory (e.g., `module_win.yaml`)
+2. Define flows with proper structure:
+```yaml
+flows:
+  win_flow:
+    description: "Log a success"
+    triggers: ["WIN", "win"]
+    steps:
+      - id: step_1
+        type: response
+        content: "What was your win today?"
+      - id: step_2
+        type: collect
+        variable: win_text
+```
+3. Call `/refresh` endpoint or restart to load
+
 ## Recent Changes
+- 2026-01-13: **Modular Architecture Refactoring**
+  - Split single flows.yaml into data/config.yaml + flows/*.yaml cartridges
+  - DataManager now merges all flow modules at startup
+  - Added per-module validation with step type checking
+  - Added router flow for main menu navigation
+
+- 2026-01-13: **Session Persistence to Database**
+  - Slots now stored in users.slots JSONB column
+  - Removed in-memory slot storage
+  - Sessions survive server restarts
+
+- 2026-01-13: **Infinite Loop Guard**
+  - Added max 50 iteration limit in flow processing
+  - Prevents runaway loops in malformed YAML
+
 - 2026-01-12: **Updated to full production schema**
   - Users table now stores flow state (current_flow, current_step_id)
-  - Conversations linked to user_id instead of raw phone
-  - Events table for categorized journal entries (Win, Gratitude, Crisis)
-  - Knowledge_graph table ready for AI memory with vector embeddings
+  - Events table for categorized journal entries
   - Scheduled_tasks for timed flow continuations
-
-- 2026-01-12: **Added persistent sessions and scheduled flows**
-  - Background scheduler worker checks for due tasks every 60 seconds
-  - Proper timezone handling using pytz
-  - Added followup_flow definition for check-in messages
-
-- 2026-01-12: **Moved flows/steps/slots to static YAML file**
-  - Conversation flow definitions in `flows.yaml` for version control
-  - Use `/refresh` endpoint to reload YAML without restarting

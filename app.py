@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import yaml
+import glob
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import threading
@@ -288,14 +289,16 @@ class ConversationLogger:
 
 class DataManager:
 
-    def __init__(self, yaml_path='flows.yaml', schema_path='flow_schema.json'):
-        self.yaml_path = yaml_path
+    def __init__(self, config_path='data/config.yaml', flows_dir='flows/', schema_path='flow_schema.json'):
+        self.config_path = config_path
+        self.flows_dir = flows_dir
         self.schema_path = schema_path
         self.schema = None
         self.config = {}
         self.flows = {}
         self.symptoms = {}
         self.slots_def = {}
+        self.system_prompts = {}
         self.load_schema()
         self.refresh_data()
 
@@ -309,39 +312,86 @@ class DataManager:
         except Exception as e:
             print(f"Warning: Could not load schema: {e}")
 
-    def validate_yaml(self, data):
-        if not self.schema:
+    def validate_flow_module(self, module_data, file_path):
+        if not self.schema or not module_data:
             return True
         try:
-            validate(instance=data, schema=self.schema)
-            print("YAML validation passed.")
+            if 'flows' in module_data:
+                for flow_id, flow_body in module_data['flows'].items():
+                    if 'steps' in flow_body:
+                        for step in flow_body['steps']:
+                            step_type = step.get('type')
+                            if step_type not in ['response', 'collect', 'action', 'branch', 'validate', 'schedule']:
+                                print(f"Warning: Invalid step type '{step_type}' in flow '{flow_id}' ({file_path})")
+                                return False
+            print(f"Validated: {file_path}")
             return True
-        except ValidationError as e:
-            print(f"YAML validation warning: {e.message}")
+        except Exception as e:
+            print(f"Validation error for {file_path}: {e}")
             return False
 
     def refresh_data(self):
-        print(f"Loading Logic from YAML file: {self.yaml_path}")
-        try:
-            with open(self.yaml_path, 'r') as f:
-                data = yaml.safe_load(f)
+        master_data = {
+            'flows': {},
+            'system_prompts': {},
+            'config': {},
+            'symptoms': {},
+            'slots': {}
+        }
 
-            self.validate_yaml(data)
+        if os.path.exists(self.config_path):
+            print(f"Loading base config from: {self.config_path}")
+            try:
+                with open(self.config_path, 'r') as f:
+                    config_content = yaml.safe_load(f) or {}
+                for key in ['config', 'system_prompts', 'symptoms', 'slots']:
+                    if key in config_content:
+                        master_data[key].update(config_content[key])
+            except Exception as e:
+                print(f"Error loading config: {e}")
+        else:
+            print(f"Warning: Config file not found at {self.config_path}")
 
-            self.config = data.get('config', {})
-            self.flows = data.get('flows', {})
-            self.symptoms = data.get('symptoms', {})
-            self.slots_def = data.get('slots', {})
+        flow_files = glob.glob(os.path.join(self.flows_dir, '*.yaml'))
+        print(f"Loading {len(flow_files)} flow modules from: {self.flows_dir}")
+        
+        for file_path in flow_files:
+            try:
+                with open(file_path, 'r') as f:
+                    module_data = yaml.safe_load(f)
+                    
+                    if not module_data:
+                        continue
 
-            total_steps = sum(
-                len(f.get('steps', [])) for f in self.flows.values())
-            print(
-                f"Loaded {len(self.flows)} flows, {total_steps} steps, {len(self.symptoms)} symptoms, {len(self.slots_def)} slots."
-            )
-        except FileNotFoundError:
-            print(f"ERROR: YAML file not found: {self.yaml_path}")
-        except Exception as e:
-            print(f"CRITICAL ERROR loading YAML data: {e}")
+                    if not self.validate_flow_module(module_data, file_path):
+                        print(f"Skipping invalid module: {file_path}")
+                        continue
+
+                    if 'flows' in module_data:
+                        for flow_id, flow_body in module_data['flows'].items():
+                            if flow_id in master_data['flows']:
+                                print(f"Warning: Duplicate flow ID '{flow_id}' in {file_path}. Overwriting.")
+                            master_data['flows'][flow_id] = flow_body
+                    
+                    if 'campaigns' in module_data:
+                        if 'campaigns' not in master_data:
+                            master_data['campaigns'] = {}
+                        master_data['campaigns'].update(module_data['campaigns'])
+
+            except Exception as e:
+                print(f"Error loading module {file_path}: {e}")
+
+        self.config = master_data['config']
+        self.flows = master_data['flows']
+        self.symptoms = master_data['symptoms']
+        self.slots_def = master_data['slots']
+        self.system_prompts = master_data['system_prompts']
+
+        total_steps = sum(len(f.get('steps', [])) for f in self.flows.values())
+        print(f"System Loaded: {len(self.flows)} flows, {total_steps} steps, {len(self.symptoms)} symptoms, {len(self.slots_def)} slots.")
+
+    def get_system_prompt(self, key='default'):
+        return self.system_prompts.get(key, "You are Neuvero Pulse.")
 
     def get_flow(self, flow_id):
         flow_data = self.flows.get(flow_id)
