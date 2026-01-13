@@ -13,7 +13,6 @@ flows:
               score_key: "sys" 
             - text: "Fix the People (Check morale, alignment, and energy)"
               score_key: "emp"
-
         - id: "q2"
           text: "In a heated meeting, what annoys you more?"
           options:
@@ -21,15 +20,13 @@ flows:
               score_key: "emp"
             - text: "People talking without data (violating logical accuracy)."
               score_key: "sys"
-
         - id: "q3"
           text: "You have 30 minutes before a high-stakes presentation. You spend it:"
           options:
             - text: "Triple-checking the numbers and slides for errors."
               score_key: "sys"
-            - text: "Walking around to gauge the mood and energy of the room."
+            - text: "Chatting with people to see how they are feeling."
               score_key: "emp"
-
         - id: "q4"
           text: "You walk into a chaotic office. You immediately notice:"
           options:
@@ -37,7 +34,6 @@ flows:
               score_key: "sys"
             - text: "The stressed body language and tension in the air."
               score_key: "emp"
-
         - id: "q5"
           text: "You are finally sold on a new initiative because:"
           options:
@@ -45,31 +41,25 @@ flows:
               score_key: "sys"
             - text: "It feels like the right thing to do for the people."
               score_key: "emp"
-
       results:
         logic: "majority_wins"
         profiles:
           sys: "Systemizer"
           emp: "Empathizer"
-
     triggers: []
     steps:
       - id: step_1
         type: response
         content: "Welcome to Neuvero Pulse, {first_name}! Analysis complete."
-
       - id: step_2
         type: action
         action_name: generate_profile_insights
-
       - id: step_3
         type: response
         content: "You are a **{calculated_profile}**.\n\n{profile_insights}"
-
       - id: step_4
         type: response
         content: "I've unlocked Neuvero's PULSE app for you. Text MENU to see your tools."
-
       - id: step_5
         type: schedule
         delay_days: 1
@@ -110,7 +100,6 @@ flows:
         profiles:
           high: "Red Zone"
           low: "Green Zone"
-    
     triggers: []
     steps:
       - id: step_1

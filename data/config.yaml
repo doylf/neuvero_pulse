@@ -67,6 +67,24 @@ slots:
     persist: true
     description: "Profile from web assessment"
 
+profile_insights:
+  prompt_template: |
+    You are generating a personalized leadership insight for {first_name}, whose neuro-leadership profile is: {calculated_profile}.
+    
+    Generate a 2-3 sentence coaching insight that:
+    1. Acknowledges their profile type's core strength
+    2. Names one blind spot to watch
+    3. Provides one actionable micro-tip
+    
+    Keep it under 280 characters total. Be direct, executive-level tone. No fluff.
+  
+  fallbacks:
+    Systemizer: "As a Systemizer, you excel at data-driven decisions. Watch for analysis paralysis. Tip: Set a 2-minute timer before diving into data."
+    Empathizer: "As an Empathizer, you excel at reading people. Watch for over-indexing on harmony. Tip: Schedule 10 min of solo thinking before big decisions."
+    Red Zone: "Your burnout indicators are elevated. Priority: protect your recovery time this week. Start with one hard boundary."
+    Green Zone: "Your stress levels are manageable. Maintain your current rhythm and consider one stretch goal."
+    default: "Your leadership profile has unique strengths. Focus on leveraging what comes naturally while building awareness of your blind spots."
+
 symptoms:
   micromanagement:
     name: "Micromanagement"

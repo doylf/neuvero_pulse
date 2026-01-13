@@ -539,10 +539,27 @@ class ActionEngine:
             profile_type = slots.get('calculated_profile', 'Unknown')
             first_name = slots.get('first_name', 'Leader')
             
-            if profile_type == 'Systemizer':
-                insights = f"{first_name}, as a Systemizer you excel at data-driven decisions and process optimization. Your superpower: seeing patterns others miss. Watch for: analysis paralysis. Quick tip: Set a 2-minute timer before diving into data."
-            else:
-                insights = f"{first_name}, as an Empathizer you excel at reading people and building consensus. Your superpower: sensing team dynamics before problems surface. Watch for: over-indexing on harmony. Quick tip: Schedule 10 min of solo thinking before big decisions."
+            profile_config = db.config.get('profile_insights', {})
+            fallbacks = profile_config.get('fallbacks', {})
+            prompt_template = profile_config.get('prompt_template', '')
+            
+            insights = None
+            
+            if gemini_model and prompt_template:
+                try:
+                    prompt = prompt_template.format(
+                        first_name=first_name,
+                        calculated_profile=profile_type
+                    )
+                    response = gemini_model.generate_content(prompt)
+                    insights = response.text.strip()
+                    print(f"Generated dynamic insights for {profile_type}")
+                except Exception as e:
+                    print(f"Gemini error generating insights: {e}")
+            
+            if not insights:
+                insights = fallbacks.get(profile_type, fallbacks.get('default', 
+                    f"{first_name}, your {profile_type} profile brings unique strengths to your leadership."))
             
             slots['profile_insights'] = insights
             return None

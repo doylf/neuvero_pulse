@@ -30,11 +30,12 @@
             </div>
 
             {% for q in survey.questions %}
+            {% set question_num = loop.index %}
             <div class="slide" id="slide-{{ loop.index0 }}">
                 <label class="block text-lg font-medium mb-4">Q{{ loop.index }}: {{ q.text }}</label>
                 <div class="space-y-3">
                     {% for opt in q.options %}
-                    <button onclick="recordAnswer('{{ opt.score_key }}'); nextSlide({{ loop.index }})" 
+                    <button onclick="recordAnswer('{{ opt.score_key }}'); nextSlide({{ question_num }})" 
                             class="w-full text-left p-4 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 hover:border-sky-400 transition">
                         {{ opt.text }}
                     </button>
