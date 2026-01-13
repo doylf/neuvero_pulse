@@ -1,55 +1,88 @@
 flows:
-  hook_style_quiz:
-    description: "LinkedIn Hook - Communication Style"
-    web_survey:
-      slug: "style"
-      title: "Discover Your Neuro-Leadership Style"
-      description: "Are you a Systemizer or an Empathizer? Take the 3-question diagnostic."
-      questions:
-        - id: "q1"
-          text: "A project is failing. What is your first instinct?"
-          options:
-            - text: "Fix the Process (Data, Timelines)"
-              score_key: "sys" 
-            - text: "Fix the People (Morale, Alignment)"
-              score_key: "emp"
-        
-        - id: "q2"
-          text: "In a heated meeting, what annoys you more?"
-          options:
-            - text: "People being rude or blunt."
-              score_key: "emp"
-            - text: "People talking without data."
-              score_key: "sys"
-              
-        - id: "q3"
-          text: "You have 30 minutes before a big presentation. You spend it:"
-          options:
-            - text: "Triple-checking the numbers and slides."
-              score_key: "sys"
-            - text: "Walking around to gauge team energy."
-              score_key: "emp"
+hook_style_quiz:
+  description: "LinkedIn Hook - Communication Style (5 Questions)"
+  web_survey:
+    slug: "style"
+    title: "Discover Your Neuro-Leadership Style"
+    description: "Are you a Systemizer or an Empathizer? Take the 5-question diagnostic."
+    questions:
+      # QUESTION 1: The Crisis (Reaction)
+      - id: "q1"
+        text: "A project is failing. What is your first instinct?"
+        options:
+          - text: "Fix the Process (Analyze the data, timeline, and budget)"
+            score_key: "sys" 
+          - text: "Fix the People (Check morale, alignment, and energy)"
+            score_key: "emp"
 
-      results:
-        logic: "majority_wins"
-        profiles:
-          sys: "Systemizer"
-          emp: "Empathizer"
+      # QUESTION 2: The Meeting (Annoyance)
+      - id: "q2"
+        text: "In a heated meeting, what annoys you more?"
+        options:
+          - text: "People being rude or blunt (violating social harmony)."
+            score_key: "emp"
+          - text: "People talking without data (violating logical accuracy)."
+            score_key: "sys"
 
-    triggers: []
-    steps:
-      - id: step_1
-        type: response
-        content: "Welcome to Neuvero Pulse, {first_name}! Your leadership profile: {calculated_profile}."
-      - id: step_2
-        type: action
-        action_name: generate_profile_insights
-      - id: step_3
-        type: response
-        content: "{profile_insights}"
-      - id: step_4
-        type: response
-        content: "Ready to optimize your leadership? Text MENU to see all commands, or OUCH if you need immediate support."
+      # QUESTION 3: The Prep (Focus)
+      - id: "q3"
+        text: "You have 30 minutes before a high-stakes presentation. You spend it:"
+        options:
+          - text: "Triple-checking the numbers and slides for errors."
+            score_key: "sys"
+          - text: "Walking around to gauge the mood and energy of the room."
+            score_key: "emp"
+
+      # QUESTION 4: The Room Scan (Perception) [NEW]
+      - id: "q4"
+        text: "You walk into a chaotic office. You immediately notice:"
+        options:
+          - text: "The inefficient workflow and disorganized layout."
+            score_key: "sys"
+          - text: "The stressed body language and tension in the air."
+            score_key: "emp"
+
+      # QUESTION 5: The Buy-In (Motivation) [NEW]
+      - id: "q5"
+        text: "You are finally sold on a new initiative because:"
+        options:
+          - text: "The logic is sound and the ROI is proven."
+            score_key: "sys"
+          - text: "It feels like the right thing to do for the people."
+            score_key: "emp"
+
+    results:
+      logic: "majority_wins"
+      profiles:
+        sys: "Systemizer"
+        emp: "Empathizer"
+
+  # The SMS Delivery Logic
+  triggers: []
+  steps:
+    - id: step_1
+      type: response
+      content: "Welcome to Neuvero Pulse, {first_name}! Analysis complete."
+
+    - id: step_2
+      type: action
+      action_name: generate_profile_insights
+
+    - id: step_3
+      type: response
+      content: "You are a **{calculated_profile}**.\n\n{profile_insights}"
+
+    - id: step_4
+      type: response
+      content: "I've unlocked Neuvero's PULSE app for you. Text MENU to see your tools."
+
+    # Auto-enroll in the Nurture Sequence
+    - id: step_5
+      type: schedule
+      delay_days: 1
+      resume_time: "09:00"
+      target_flow: campaign_day1
+      content: "I'll send your first leadership hack tomorrow morning."
 
   hook_burnout_quiz:
     description: "Executive Burnout Index"
