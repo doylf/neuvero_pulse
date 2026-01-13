@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neuvero Leadership Profile</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: sans-serif; }
+        .slide { display: none; }
+        .slide.active { display: block; animation: fadeIn 0.5s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div class="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
+        
+        <div class="mb-8 text-center">
+            <h1 class="text-2xl font-bold text-sky-400 tracking-wider">NEUVERO PULSE</h1>
+            <div class="h-1 w-16 bg-sky-600 mx-auto mt-2 rounded"></div>
+        </div>
+
+        <form id="quizForm" onsubmit="event.preventDefault()">
+            
+            <div class="slide active" id="step-0">
+                <h2 class="text-xl font-semibold mb-4 text-white">Discover Your Neuro-Leadership Style</h2>
+                <p class="text-slate-400 mb-6">Are you a Systemizer or an Empathizer? Take the 3-question diagnostic to find out.</p>
+                <button onclick="nextStep(1)" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 px-4 rounded-lg transition">Start Assessment</button>
+            </div>
+
+            <div class="slide" id="step-1">
+                <label class="block text-lg font-medium mb-4">Q1: A project is failing. What is your first instinct?</label>
+                <div class="space-y-3">
+                    <button onclick="recordAnswer(1, 'sys'); nextStep(2)" class="w-full text-left p-4 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 hover:border-sky-400 transition">
+                        A) Fix the Process (Data, Timelines)
+                    </button>
+                    <button onclick="recordAnswer(1, 'emp'); nextStep(2)" class="w-full text-left p-4 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 hover:border-sky-400 transition">
+                        B) Fix the People (Morale, Alignment)
+                    </button>
+                </div>
+            </div>
+
+            <div class="slide" id="step-2">
+                <label class="block text-lg font-medium mb-4">Q2: In a heated meeting, what annoys you more?</label>
+                <div class="space-y-3">
+                    <button onclick="recordAnswer(2, 'emp'); nextStep(3)" class="w-full text-left p-4 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 hover:border-sky-400 transition">
+                        A) People being rude or blunt.
+                    </button>
+                    <button onclick="recordAnswer(2, 'sys'); nextStep(3)" class="w-full text-left p-4 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 hover:border-sky-400 transition">
+                        B) People talking without data.
+                    </button>
+                </div>
+            </div>
+
+            <div class="slide" id="step-3">
+                <h2 class="text-xl font-semibold mb-4 text-white">Final Step</h2>
+                <p class="text-slate-400 mb-4 text-sm">We generate your profile via SMS to ensure privacy.</p>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-bold mb-2 text-slate-300">First Name</label>
+                    <input type="text" id="first_name" required class="w-full p-3 bg-slate-900 border border-slate-600 rounded text-white focus:outline-none focus:border-sky-500" placeholder="Steve">
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-bold mb-2 text-slate-300">Mobile Number</label>
+                    <input type="tel" id="phone" required class="w-full p-3 bg-slate-900 border border-slate-600 rounded text-white focus:outline-none focus:border-sky-500" placeholder="+1 613 555 0199">
+                    <p class="text-xs text-slate-500 mt-2">Standard rates apply. Reply YES to verify.</p>
+                </div>
+
+                <button onclick="submitQuiz()" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-lg transition">Get My Results</button>
+            </div>
+
+            <div class="slide text-center" id="step-4">
+                <div class="text-5xl mb-4">📱</div>
+                <h2 class="text-2xl font-bold text-white mb-2">Check your phone!</h2>
+                <p class="text-slate-400 mb-6">We just sent a verification text to <span id="displayPhone" class="text-sky-400"></span>.</p>
+                <div class="bg-slate-900 p-4 rounded-lg border border-slate-700 inline-block">
+                    <p class="text-sm font-mono text-green-400">Reply <strong>YES</strong> to download your profile.</p>
+                </div>
+            </div>
+
+        </form>
+    </div>
+
+    <script>
+        let scores = { sys: 0, emp: 0 };
+
+        function nextStep(step) {
+            document.querySelectorAll('.slide').forEach(el => el.classList.remove('active'));
+            document.getElementById('step-' + step).classList.add('active');
+        }
+
+        function recordAnswer(q, type) {
+            scores[type]++;
+        }
+
+        function submitQuiz() {
+            const phone = document.getElementById('phone').value;
+            const name = document.getElementById('first_name').value;
+            
+            if (!phone || !name) {
+                alert("Please fill in all fields.");
+                return;
+            }
+            
+            const profile = scores.sys >= scores.emp ? 'Systemizer' : 'Empathizer';
+
+            fetch('/hooks/typeform', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    phone: phone,
+                    first_name: name,
+                    calculated_profile: profile
+                })
+            }).then(response => {
+                if(response.ok) {
+                    document.getElementById('displayPhone').innerText = phone;
+                    nextStep(4);
+                } else {
+                    alert("Error submitting. Please check your number.");
+                }
+            }).catch(err => {
+                alert("Network error. Please try again.");
+            });
+        }
+    </script>
+</body>
+</html>

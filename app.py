@@ -4,7 +4,7 @@ import json
 import yaml
 import glob
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 import threading
 import time
 import pytz
@@ -532,6 +532,18 @@ class ActionEngine:
                 content=f"Emergency detected for user {user_phone}")
             return None
 
+        elif action_name == 'generate_profile_insights':
+            profile_type = slots.get('calculated_profile', 'Unknown')
+            first_name = slots.get('first_name', 'Leader')
+            
+            if profile_type == 'Systemizer':
+                insights = f"{first_name}, as a Systemizer you excel at data-driven decisions and process optimization. Your superpower: seeing patterns others miss. Watch for: analysis paralysis. Quick tip: Set a 2-minute timer before diving into data."
+            else:
+                insights = f"{first_name}, as an Empathizer you excel at reading people and building consensus. Your superpower: sensing team dynamics before problems surface. Watch for: over-indexing on harmony. Quick tip: Schedule 10 min of solo thinking before big decisions."
+            
+            slots['profile_insights'] = insights
+            return None
+
         elif action_name == 'complete_onboarding':
             pass
 
@@ -830,6 +842,57 @@ def home():
         "features":
         ["persistent_sessions", "scheduled_flows", "events_logging"]
     }), 200
+
+
+@app.route('/assessment', methods=['GET'])
+def show_assessment():
+    return render_template('assessment.html')
+
+
+@app.route('/hooks/typeform', methods=['POST'])
+def typeform_webhook():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    phone = data.get('phone', '').strip()
+    first_name = data.get('first_name', '').strip()
+    calculated_profile = data.get('calculated_profile', 'Unknown')
+    
+    if not phone:
+        return jsonify({"error": "Phone number required"}), 400
+    
+    phone = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+    if not phone.startswith('+'):
+        if phone.startswith('1') and len(phone) == 11:
+            phone = '+' + phone
+        elif len(phone) == 10:
+            phone = '+1' + phone
+    
+    try:
+        user = UserManager.get_or_create_user(phone)
+        if user:
+            slots = {'first_name': first_name, 'calculated_profile': calculated_profile}
+            supabase.table('users').update({
+                'slots': slots,
+                'current_flow': 'assessment_verify_flow',
+                'current_step_id': '0'
+            }).eq('phone', phone).execute()
+        
+        if twilio_client and TWILIO_PHONE_NUMBER:
+            verify_msg = f"Hi {first_name}! Your Neuvero profile is ready. Reply YES to confirm and receive your {calculated_profile} leadership insights."
+            twilio_client.messages.create(
+                body=verify_msg,
+                from_=TWILIO_PHONE_NUMBER,
+                to=phone
+            )
+            print(f"Sent verification SMS to {phone}")
+        
+        return jsonify({"status": "success", "phone": phone}), 200
+        
+    except Exception as e:
+        print(f"Typeform webhook error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 scheduler_started = False

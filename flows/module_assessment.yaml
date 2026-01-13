@@ -1,0 +1,17 @@
+flows:
+  assessment_verify_flow:
+    description: "Verification flow for assessment quiz submissions"
+    triggers: ["YES", "yes", "Yes"]
+    steps:
+      - id: step_1
+        type: response
+        content: "Welcome to Neuvero Pulse, {first_name}! Your leadership profile: {calculated_profile}."
+      - id: step_2
+        type: action
+        action_name: generate_profile_insights
+      - id: step_3
+        type: response
+        content: "{profile_insights}"
+      - id: step_4
+        type: response
+        content: "Ready to optimize your leadership? Text MENU to see all commands, or OUCH if you need immediate support."
