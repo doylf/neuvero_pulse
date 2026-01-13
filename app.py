@@ -606,11 +606,12 @@ def process_conversation(phone, user_input, is_scheduled=False):
 
             if not is_locked or new_flow_obj['flow_id'] == current_flow_id:
                 print(f"Switching context to {new_flow_obj['flow_id']}")
+                existing_slots = session.get('slots', {})
                 session = {
                     'user_id': session.get('user_id'),
                     'current_flow': new_flow_obj['flow_id'],
                     'step_order': 0,
-                    'slots': {},
+                    'slots': existing_slots,
                     'pending_slot': None,
                     'timezone': session.get('timezone', 'America/New_York')
                 }
