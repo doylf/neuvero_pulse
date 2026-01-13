@@ -1,8 +1,21 @@
-calm_flow:
-steps:
-  - type: response
-    content: "[TODO: Insert Validation Statement - 'I see you are spinning']"
-  - type: response
-    content: "[TODO: Insert 4-7-8 Breathing Exercise]"
-  - type: response
-    content: "[TODO: Insert Grounding Question - '5 things you see']"
+flows:
+  calm_flow:
+    description: "Grounding exercise for anxiety/spinning"
+    triggers: ["CALM", "calm", "ANXIOUS", "anxious", "SPINNING", "spinning"]
+    steps:
+      - id: calm_1
+        type: response
+        content: "I hear you. When things feel overwhelming, let's slow down together."
+      
+      - id: calm_2
+        type: response
+        content: "Try this: Breathe in for 4 counts... hold for 7... exhale slowly for 8. Do this 3 times."
+      
+      - id: calm_3
+        type: collect
+        variable: grounding_response
+        prompt: "Now look around. Name 3 things you can see right now."
+      
+      - id: calm_4
+        type: response
+        content: "Good. You're here, you're safe, and this moment will pass. Reply MENU when you're ready, or text anytime."
