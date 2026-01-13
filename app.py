@@ -294,6 +294,7 @@ class DataManager:
         self.symptoms = {}
         self.slots_def = {}
         self.system_prompts = {}
+        self.raw_config = {}
         self.load_schema()
         self.refresh_data()
 
@@ -372,6 +373,11 @@ class DataManager:
                         if 'campaigns' not in master_data:
                             master_data['campaigns'] = {}
                         master_data['campaigns'].update(module_data['campaigns'])
+                    
+                    if 'final_advice' in module_data:
+                        if 'final_advice' not in master_data:
+                            master_data['final_advice'] = {}
+                        master_data['final_advice'].update(module_data['final_advice'])
 
             except Exception as e:
                 print(f"Error loading module {file_path}: {e}")
@@ -381,6 +387,7 @@ class DataManager:
         self.symptoms = master_data['symptoms']
         self.slots_def = master_data['slots']
         self.system_prompts = master_data['system_prompts']
+        self.raw_config = master_data
 
         total_steps = sum(len(f.get('steps', [])) for f in self.flows.values())
         print(f"System Loaded: {len(self.flows)} flows, {total_steps} steps, {len(self.symptoms)} symptoms, {len(self.slots_def)} slots.")
@@ -483,25 +490,15 @@ class ActionEngine:
             return None
 
         elif action_name == 'generate_final_advice':
-            analysis = slots.get('ai_analysis', {})
-            subtype = slots.get('subtype_choice', 'General')
-            pattern = analysis.get('pattern', 'General Stress')
-
-            prompt = f"""
-            The user is suffering from "{pattern}".
-            They identified their neuro-subtype as "{subtype}".
-            Write a short (under 160 chars), empathetic text message with one specific actionable tip.
-            """
-            try:
-                if gemini_model:
-                    resp = gemini_model.generate_content(prompt)
-                    slots['final_advice'] = resp.text.strip()
-                else:
-                    slots[
-                        'final_advice'] = "Take a deep breath. (AI Test Mode)"
-            except:
-                slots[
-                    'final_advice'] = "Take a deep breath. We will get through this."
+            profile_type = slots.get('calculated_profile', 'Unknown')
+            
+            final_advice_config = db.raw_config.get('final_advice', {})
+            advice = final_advice_config.get(profile_type, 
+                final_advice_config.get('default', 
+                    "Focus on one small experiment this week to test your leadership edge."))
+            
+            slots['final_advice'] = advice
+            print(f"Final advice for {profile_type}: {advice}")
             return None
 
         elif action_name == 'log_to_supabase':
