@@ -610,6 +610,16 @@ def process_conversation(phone, user_input, is_scheduled=False):
             if not is_locked or new_flow_obj['flow_id'] == current_flow_id:
                 print(f"Switching context to {new_flow_obj['flow_id']}")
                 existing_slots = session.get('slots', {})
+                
+                new_flow_steps = db.get_steps_for_flow(new_flow_obj['flow_id'])
+                flow_slot_vars = set()
+                for step in new_flow_steps:
+                    if step.get('type') == 'collect' and step.get('variable'):
+                        flow_slot_vars.add(step.get('variable'))
+                
+                for var in flow_slot_vars:
+                    existing_slots.pop(var, None)
+                
                 session = {
                     'user_id': session.get('user_id'),
                     'current_flow': new_flow_obj['flow_id'],
