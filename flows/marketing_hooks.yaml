@@ -112,3 +112,10 @@ flows:
       - id: step_1
         type: response
         content: "Pulse: You scored in the {calculated_profile}. Let's work on that."
+
+final_advice:
+    Systemizer: "Your superpower is logic. This week: before solving, pause 30 sec to ask 'how does the team FEEL about this?'"
+    Empathizer: "Your superpower is empathy. This week: before deciding, pause 30 sec to ask 'what does the DATA say?'"
+    Red Zone: "Recovery mode: block 1 hour today as 'no meetings'. Your brain needs whitespace to heal."
+    Green Zone: "Momentum mode: pick one stretch goal this week. You have the bandwidth to grow."
+    default: "Your profile is unique. Focus on one small experiment this week to test your leadership edge."
